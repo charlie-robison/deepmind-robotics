@@ -47,14 +47,30 @@
       opacity: 1;
       animation: flash-pulse 0.5s ease-out;
     }
+    #collide-flash {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 100; font-family: monospace; font-size: 100px; font-weight: bold;
+      color: #ff00ff; text-shadow: 0 0 40px #ff00ff, 0 0 80px #9900ff;
+      pointer-events: none; opacity: 0; transition: opacity 0.1s;
+    }
+    #collide-flash.visible {
+      opacity: 1;
+      animation: collide-pulse 0.8s ease-out;
+    }
     @keyframes flash-pulse {
       0% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    }
+    @keyframes collide-pulse {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(1.5); }
+      50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
       100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
     }
   </style>
 </head>
 <body>
   <div id="obstacle-flash">OBSTACLE!</div>
+  <div id="collide-flash">COLLIDED!</div>
   <div id="status">Connecting...</div>
   <div id="log"></div>
   <div id="topdown"></div>
@@ -150,6 +166,7 @@
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
+      if (window._dronesReady) updateDrones();
       const activeCamera = useFirstPerson ? fpCamera : camera;
       renderer.render(scene, activeCamera);
       topdownRenderer.render(scene, topdownCamera);
@@ -253,38 +270,185 @@
       log(`Spawned ${pillarMeshes.length} pillars along path`);
     }
 
-    // Find the nearest pillar within detection radius
-    function nearestPillar(px, pz) {
-      let closest = null;
-      let minDist = Infinity;
-      for (const p of pillarPositions) {
-        const d = Math.hypot(px - p.x, pz - p.z);
-        if (d < minDist) { minDist = d; closest = p; }
-      }
-      return minDist < PILLAR_DETECT_RADIUS ? { pillar: closest, dist: minDist } : null;
+    // Check if a drone is ahead of the robot on the path (not behind)
+    function isDroneAhead(drone) {
+      const wp = PATH_WAYPOINTS[currentWaypointIdx];
+      if (!wp) return false;
+      const travelDx = wp.x - cube.position.x;
+      const travelDz = wp.z - cube.position.z;
+      const toDroneDx = drone.mesh.position.x - cube.position.x;
+      const toDroneDz = drone.mesh.position.z - cube.position.z;
+      return (travelDx * toDroneDx + travelDz * toDroneDz) > 0;
     }
 
-    // Compute lateral dodge: perpendicular to travel direction, away from pillar
-    function computeDodge(pillar, travelDx, travelDz) {
-      // Perpendicular to travel direction (left = (-dz, dx), right = (dz, -dx))
+    const COLLISION_RADIUS = 0.5;
+
+    // Find the nearest obstacle (pillar or active drone ahead) within detection radius
+    function nearestObstacle(px, pz) {
+      let closest = null;
+      let minDist = Infinity;
+      let type = null;
+
+      // Check pillars
+      for (const p of pillarPositions) {
+        const d = Math.hypot(px - p.x, pz - p.z);
+        if (d < minDist) { minDist = d; closest = p; type = 'pillar'; }
+      }
+
+      // Check drones — only active ones that are ahead
+      if (window._dronesReady) {
+        for (const drone of drones) {
+          if (!drone.active) continue;
+          if (!isDroneAhead(drone)) continue;
+          const ed = Math.hypot(px - drone.mesh.position.x, pz - drone.mesh.position.z);
+          if (ed < minDist) { minDist = ed; closest = { x: drone.mesh.position.x, z: drone.mesh.position.z }; type = 'enemy'; }
+        }
+      }
+
+      return minDist < PILLAR_DETECT_RADIUS ? { obstacle: closest, dist: minDist, type } : null;
+    }
+
+    // Compute lateral dodge perpendicular to travel direction
+    function computeDodge(obstacle, travelDx, travelDz, dir) {
       const len = Math.hypot(travelDx, travelDz) || 1;
+      // Left perpendicular
       const perpLx = -travelDz / len;
       const perpLz = travelDx / len;
 
-      // Vector from robot to pillar
-      const toPillarX = pillar.x - cube.position.x;
-      const toPillarZ = pillar.z - cube.position.z;
-
-      // Dot with left perpendicular: positive = pillar is to the left
-      const dot = toPillarX * perpLx + toPillarZ * perpLz;
-
-      // Dodge in the opposite direction of the pillar
-      if (dot > 0) {
-        // Pillar is to the left, dodge right
-        return { dx: -perpLx * DODGE_AMOUNT, dz: -perpLz * DODGE_AMOUNT, dir: 'right' };
+      if (dir === 'left') {
+        return { dx: perpLx * DODGE_AMOUNT, dz: perpLz * DODGE_AMOUNT };
       } else {
-        // Pillar is to the right, dodge left
-        return { dx: perpLx * DODGE_AMOUNT, dz: perpLz * DODGE_AMOUNT, dir: 'left' };
+        return { dx: -perpLx * DODGE_AMOUNT, dz: -perpLz * DODGE_AMOUNT };
+      }
+    }
+
+    // Geometric fallback: compute dodge direction from positions
+    function geometricDodgeDir(obstacle, travelDx, travelDz) {
+      const len = Math.hypot(travelDx, travelDz) || 1;
+      const perpLx = -travelDz / len;
+      const perpLz = travelDx / len;
+      const toObsX = obstacle.x - cube.position.x;
+      const toObsZ = obstacle.z - cube.position.z;
+      const dot = toObsX * perpLx + toObsZ * perpLz;
+      return dot > 0 ? 'right' : 'left'; // dodge away from obstacle
+    }
+
+    // =========================================================================
+    // DRONES: 3 flying cubes that patrol zones and block the robot
+    // =========================================================================
+    const DRONE_SPEED = 0.012;
+    const DRONE_HOVER_Y = 1.2;
+    const DRONE_PATROL_RADIUS = 1.2;   // each drone's active zone
+    const WAYPOINT_NO_FLY_RADIUS = 1.0;
+    const DRONE_COLORS = [0x9900ff, 0xff6600, 0x00ccff];
+    const DRONE_EMISSIVE = [0x4400aa, 0x883300, 0x006688];
+
+    // Drone home positions — spread along the path
+    const DRONE_HOMES = [
+      { x: 0, z: 2 },    // early path
+      { x: 2, z: 0 },    // mid path
+      { x: -1, z: -2 },  // late path
+    ];
+
+    const drones = [];
+
+    for (let i = 0; i < 3; i++) {
+      const geo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+      const mat = new THREE.MeshStandardMaterial({ color: DRONE_COLORS[i], emissive: DRONE_EMISSIVE[i], emissiveIntensity: 0.5 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(DRONE_HOMES[i].x, DRONE_HOVER_Y, DRONE_HOMES[i].z);
+      scene.add(mesh);
+
+      const light = new THREE.PointLight(DRONE_COLORS[i], 1.5, 3);
+      mesh.add(light);
+
+      // Patrol radius ring on the ground
+      const ringGeo = new THREE.RingGeometry(DRONE_PATROL_RADIUS - 0.02, DRONE_PATROL_RADIUS + 0.02, 64);
+      const ringMat = new THREE.MeshBasicMaterial({ color: DRONE_COLORS[i], transparent: true, opacity: 0.2, side: THREE.DoubleSide });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(DRONE_HOMES[i].x, 0.01, DRONE_HOMES[i].z);
+      scene.add(ring);
+
+      drones.push({
+        mesh,
+        home: DRONE_HOMES[i],
+        active: false,   // only active when robot is in patrol radius
+        bobOffset: i * 2, // stagger the bobbing
+      });
+    }
+    window._dronesReady = true;
+
+    function updateDrones() {
+      for (const drone of drones) {
+        const robotDist = Math.hypot(cube.position.x - drone.home.x, cube.position.z - drone.home.z);
+        drone.active = robotDist < DRONE_PATROL_RADIUS;
+
+        if (drone.active) {
+          // Intercept: move between robot and its current waypoint
+          const wp = PATH_WAYPOINTS[currentWaypointIdx] || PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
+          const targetX = (cube.position.x + wp.x) / 2;
+          const targetZ = (cube.position.z + wp.z) / 2;
+
+          const dx = targetX - drone.mesh.position.x;
+          const dz = targetZ - drone.mesh.position.z;
+          const dist = Math.hypot(dx, dz);
+
+          if (dist > 0.1) {
+            let newX = drone.mesh.position.x + (dx / dist) * DRONE_SPEED;
+            let newZ = drone.mesh.position.z + (dz / dist) * DRONE_SPEED;
+
+            // Stay within patrol radius
+            const homeDist = Math.hypot(newX - drone.home.x, newZ - drone.home.z);
+            if (homeDist > DRONE_PATROL_RADIUS) {
+              const hd = Math.hypot(newX - drone.home.x, newZ - drone.home.z) || 0.01;
+              newX = drone.home.x + ((newX - drone.home.x) / hd) * DRONE_PATROL_RADIUS;
+              newZ = drone.home.z + ((newZ - drone.home.z) / hd) * DRONE_PATROL_RADIUS;
+            }
+
+            // Enforce no-fly zone around waypoints
+            for (const w of PATH_WAYPOINTS) {
+              const wd = Math.hypot(newX - w.x, newZ - w.z);
+              if (wd < WAYPOINT_NO_FLY_RADIUS) {
+                const pushDx = newX - w.x;
+                const pushDz = newZ - w.z;
+                const pushDist = Math.hypot(pushDx, pushDz) || 0.01;
+                newX = w.x + (pushDx / pushDist) * WAYPOINT_NO_FLY_RADIUS;
+                newZ = w.z + (pushDz / pushDist) * WAYPOINT_NO_FLY_RADIUS;
+              }
+            }
+
+            drone.mesh.position.x = newX;
+            drone.mesh.position.z = newZ;
+          }
+        } else {
+          // Return to home position when inactive
+          const dx = drone.home.x - drone.mesh.position.x;
+          const dz = drone.home.z - drone.mesh.position.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist > 0.1) {
+            drone.mesh.position.x += (dx / dist) * DRONE_SPEED;
+            drone.mesh.position.z += (dz / dist) * DRONE_SPEED;
+          }
+        }
+
+        // Hover bob + spin
+        drone.mesh.position.y = DRONE_HOVER_Y + Math.sin(Date.now() * 0.003 + drone.bobOffset) * 0.3;
+        drone.mesh.rotation.y += 0.03;
+        drone.mesh.rotation.x += 0.01;
+
+        // Collision check
+        const collDist = Math.hypot(cube.position.x - drone.mesh.position.x, cube.position.z - drone.mesh.position.z);
+        if (collDist < COLLISION_RADIUS) {
+          const flashEl = document.getElementById('collide-flash');
+          if (!flashEl.classList.contains('visible')) {
+            flashEl.classList.remove('visible');
+            void flashEl.offsetWidth;
+            flashEl.classList.add('visible');
+            setTimeout(() => flashEl.classList.remove('visible'), 800);
+            log('COLLIDED with drone!');
+          }
+        }
       }
     }
 
@@ -405,20 +569,12 @@
       const dz = wp.z - pos.z;
       const dist = Math.hypot(dx, dz);
       const heading = (cube.rotation.y * 180 / Math.PI) % 360;
-      return `Obstacle avoidance robot. First-person camera view.
-
-Position: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). Target: (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}), dist=${dist.toFixed(1)}.
-
-RED PILLARS are obstacles. If you see ANY red pillar anywhere in the image — left, right, center, near or far — you MUST output nonzero adjust values to steer away from it.
-- Pillar on left or center-left: adjust_dx=0.4 (steer right)
-- Pillar on right or center-right: adjust_dx=-0.4 (steer left)
-- Pillar dead center: adjust_dx=0.4 (dodge right)
-- No red pillars visible at all: adjust_dx=0, adjust_dz=0
-
-Keep reasoning under 15 words.`;
+      return `Robot navigating a room. Position: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). Target: (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}).
+Look for RED PILLARS (static obstacles) and a PURPLE GLOWING CUBE (flying enemy). If you see any obstacle or enemy, output dodge:"left" or dodge:"right" to avoid it.`;
     }
 
-    function stepTowardWaypoint(vlmDir = null) {
+    // Step forward toward waypoint with optional lateral dodge direction
+    function stepTowardWaypoint(dodgeDir = null) {
       const wp = PATH_WAYPOINTS[currentWaypointIdx];
       const dx = wp.x - cube.position.x;
       const dz = wp.z - cube.position.z;
@@ -428,38 +584,25 @@ Keep reasoning under 15 words.`;
         if (currentWaypointIdx < PATH_WAYPOINTS.length - 1) {
           currentWaypointIdx++;
           log(`Reached waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`);
-          return { done: false, dodging: false };
+          return true; // stepped
         }
-        return { done: true, dodging: false };
+        return 'done';
       }
 
       // Forward component: always move toward waypoint
       const step = Math.min(STEP_SIZE, dist);
-      const fwdDx = (dx / dist) * step;
-      const fwdDz = (dz / dist) * step;
+      let moveDx = (dx / dist) * step;
+      let moveDz = (dz / dist) * step;
 
-      // Check proximity to pillars
-      const nearby = nearestPillar(cube.position.x, cube.position.z);
-      let moveDx = fwdDx;
-      let moveDz = fwdDz;
-      let dodging = false;
-
-      if (nearby) {
-        // Compute lateral dodge perpendicular to travel direction
-        const dodge = computeDodge(nearby.pillar, dx, dz);
-        // Scale dodge by how close we are (stronger when closer)
-        const strength = 1 - (nearby.dist / PILLAR_DETECT_RADIUS);
-        moveDx += dodge.dx * strength;
-        moveDz += dodge.dz * strength;
-        dodging = true;
-        log(`Dodging ${dodge.dir} (pillar at ${nearby.pillar.x.toFixed(1)},${nearby.pillar.z.toFixed(1)}, dist=${nearby.dist.toFixed(2)})`);
-
-        // Flash obstacle warning
-        const flashEl = document.getElementById('obstacle-flash');
-        flashEl.classList.remove('visible');
-        void flashEl.offsetWidth;
-        flashEl.classList.add('visible');
-        setTimeout(() => flashEl.classList.remove('visible'), 500);
+      // Apply lateral dodge if VLM said left/right
+      if (dodgeDir) {
+        const nearby = nearestObstacle(cube.position.x, cube.position.z);
+        if (nearby) {
+          const dodge = computeDodge(nearby.obstacle, dx, dz, dodgeDir);
+          const strength = 1 - (nearby.dist / PILLAR_DETECT_RADIUS);
+          moveDx += dodge.dx * strength;
+          moveDz += dodge.dz * strength;
+        }
       }
 
       // Clamp total movement to step size
@@ -489,8 +632,11 @@ Keep reasoning under 15 words.`;
         }).catch(() => {});
       }
 
-      return { done: false, dodging };
+      return true; // stepped
     }
+
+    // Flag to prevent WS echo from double-applying nav moves
+    let navActive = false;
 
     // =========================================================================
     // MAIN INIT: PHASE 1 (ANALYZE) -> PHASE 2 (NAVIGATE)
@@ -547,16 +693,20 @@ Keep reasoning under 15 words.`;
         // Small delay so the user can see the planned path before navigation starts
         await new Promise(r => setTimeout(r, 2000));
 
-        // ---- PHASE 2: Navigate with real-time obstacle avoidance ----
+        // ---- PHASE 2: Option B — proximity triggers, VLM decides direction ----
         navActive = true;
-        log('Phase 2: Starting real-time navigation with Overshoot...');
-        const canvasStream = renderer.domElement.captureStream(10);
+        log('Phase 2: Starting navigation (proximity + VLM dodge)...');
 
+        const canvasStream = renderer.domElement.captureStream(10);
         const origGUM2 = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
           if (constraints && constraints.video) return canvasStream;
           return origGUM2(constraints);
         };
+
+        let waitingForVlm = false;
+        let vlmDodgeDir = null; // 'left' or 'right' from VLM
+        let navDone = false;
 
         const vision = new RealtimeVision({
           apiKey: key,
@@ -566,48 +716,104 @@ Keep reasoning under 15 words.`;
           outputSchema: {
             type: 'object',
             properties: {
-              adjust_dx: { type: 'number', description: 'Lateral X adjustment for obstacle avoidance (-0.5 to 0.5, 0 if clear)' },
-              adjust_dz: { type: 'number', description: 'Lateral Z adjustment for obstacle avoidance (-0.5 to 0.5, 0 if clear)' },
-              reasoning: { type: 'string', description: 'Brief: what you see (max 20 words)' },
+              dodge: { type: 'string', description: 'Which way to dodge: "left" or "right"' },
             },
-            required: ['adjust_dx', 'adjust_dz', 'reasoning'],
+            required: ['dodge'],
           },
           onResult: (result) => {
-            // Each VLM response triggers one step — proximity handles dodging
-            let reasoning = '';
+            if (!waitingForVlm) return;
+            let dir = null;
             if (result.ok) {
               const raw = (result.result || '').trim();
-              const reasonMatch = raw.match(/"reasoning"\s*:\s*"([^"]*)/);
-              reasoning = reasonMatch ? reasonMatch[1] : raw.substring(0, 80);
+              const match = raw.match(/"dodge"\s*:\s*"(left|right)"/i);
+              if (match) dir = match[1].toLowerCase();
+              log(`VLM says dodge: ${dir || 'unclear'}`);
             }
 
-            const { done, dodging } = stepTowardWaypoint();
-
-            const wp = PATH_WAYPOINTS[currentWaypointIdx];
-            const dist = Math.hypot(cube.position.x - wp.x, cube.position.z - wp.z);
-            const wpLabel = `WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`;
-            const status = dodging ? 'DODGING' : 'clear';
-            overshootResultEl.textContent = `${wpLabel} | dist:${dist.toFixed(2)} | ${status}\n${reasoning}`;
-
-            if (done) {
-              overshootResultEl.textContent = 'Path complete!';
-              log('Path following complete!');
-              vision.stop();
-              return;
+            if (!dir) {
+              // VLM didn't give a clear answer — use geometric fallback
+              const nearby = nearestObstacle(cube.position.x, cube.position.z);
+              if (nearby) {
+                const wp = PATH_WAYPOINTS[currentWaypointIdx];
+                dir = geometricDodgeDir(nearby.obstacle, wp.x - cube.position.x, wp.z - cube.position.z);
+                log(`VLM unclear, geometric fallback: ${dir}`);
+              } else {
+                dir = 'left';
+              }
             }
 
-            vision.updatePrompt(buildNavPrompt());
+            vlmDodgeDir = dir;
+            waitingForVlm = false;
           },
           onError: (error) => {
-            overshootResultEl.textContent = `Error: ${error.message}`;
-            log(`Overshoot error: ${error.message}`);
+            log(`VLM error: ${error.message}`);
+            // Fallback on error
+            const nearby = nearestObstacle(cube.position.x, cube.position.z);
+            if (nearby) {
+              const wp = PATH_WAYPOINTS[currentWaypointIdx];
+              vlmDodgeDir = geometricDodgeDir(nearby.obstacle, wp.x - cube.position.x, wp.z - cube.position.z);
+            }
+            waitingForVlm = false;
           },
         });
 
         await vision.start();
-        log('Overshoot real-time navigation started');
-        overshootResultEl.textContent = `Navigating ${PATH_WAYPOINTS.length - 1} waypoints (deviating around obstacles)`;
+        log('VLM started for dodge decisions');
         window._overshootVision = vision;
+
+        // Navigation loop
+        const NAV_INTERVAL = 300;
+        const navTimer = setInterval(() => {
+          if (navDone) return;
+
+          // Check proximity
+          const nearby = nearestObstacle(cube.position.x, cube.position.z);
+
+          if (nearby && !waitingForVlm && !vlmDodgeDir) {
+            // Obstacle detected! Pause and ask VLM which way to dodge
+            waitingForVlm = true;
+            const obstLabel = nearby.type === 'enemy' ? 'ENEMY' : 'PILLAR';
+            log(`${obstLabel} detected at dist=${nearby.dist.toFixed(2)}, asking VLM...`);
+            overshootResultEl.textContent = `${obstLabel} nearby! Asking VLM which way to dodge...`;
+
+            // Flash warning
+            const flashEl = document.getElementById('obstacle-flash');
+            flashEl.classList.remove('visible');
+            void flashEl.offsetWidth;
+            flashEl.classList.add('visible');
+            setTimeout(() => flashEl.classList.remove('visible'), 500);
+
+            // Update prompt with obstacle context
+            const wp = PATH_WAYPOINTS[currentWaypointIdx];
+            vision.updatePrompt(`You see an obstacle ahead. Should the robot dodge LEFT or RIGHT to avoid it? The robot is heading toward (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}). Answer with just "left" or "right".`);
+            return; // wait for VLM response
+          }
+
+          if (waitingForVlm) {
+            overshootResultEl.textContent = 'Waiting for VLM dodge direction...';
+            return; // still waiting
+          }
+
+          // Move: with dodge if VLM provided direction, otherwise straight
+          const result = stepTowardWaypoint(vlmDodgeDir);
+          vlmDodgeDir = null; // reset after applying
+
+          if (result === 'done') {
+            navDone = true;
+            clearInterval(navTimer);
+            overshootResultEl.textContent = 'Path complete!';
+            log('Path following complete!');
+            vision.stop();
+            return;
+          }
+
+          const wp = PATH_WAYPOINTS[currentWaypointIdx];
+          const dist = Math.hypot(cube.position.x - wp.x, cube.position.z - wp.z);
+          const wpLabel = `WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`;
+          overshootResultEl.textContent = `${wpLabel} | dist:${dist.toFixed(2)} | clear`;
+
+          vision.updatePrompt(buildNavPrompt());
+        }, NAV_INTERVAL);
       } catch (err) {
         overshootResultEl.textContent = `Failed: ${err.message}`;
         log(`Overshoot init failed: ${err.message}`);
@@ -615,9 +821,6 @@ Keep reasoning under 15 words.`;
     }
 
     initOvershoot();
-
-    // Flag to prevent WS echo from double-applying nav moves
-    let navActive = false;
 
     // WebSocket connection
     function connect() {
