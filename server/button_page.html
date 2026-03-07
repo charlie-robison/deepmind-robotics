@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Path Tracer</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #1a1a2e;
+      font-family: monospace;
+      color: #fff;
+      gap: 16px;
+      padding: 20px;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    input[type="file"] {
+      color: #fff;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      font-family: monospace;
+      background: #0f0;
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover { background: #0c0; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    #canvas-container {
+      position: relative;
+      border: 2px solid #333;
+      border-radius: 4px;
+    }
+    canvas {
+      display: block;
+    }
+    #status {
+      color: #aaa;
+      font-size: 14px;
+    }
+    #description {
+      max-width: 600px;
+      text-align: center;
+      color: #ccc;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Path Tracer — Gemini Vision</h2>
+  <div class="controls">
+    <input type="file" id="fileInput" accept="image/*">
+    <button id="btn" disabled>Trace Path</button>
+  </div>
+  <div id="status">Upload an image to begin</div>
+  <div id="canvas-container">
+    <canvas id="canvas"></canvas>
+  </div>
+  <div id="description"></div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const btn = document.getElementById('btn');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+    const descEl = document.getElementById('description');
+
+    let currentImage = null;
+    let currentFile = null;
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      currentFile = file;
+
+      const img = new Image();
+      img.onload = () => {
+        currentImage = img;
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        btn.disabled = false;
+        statusEl.textContent = `Image loaded (${img.width}x${img.height})`;
+        descEl.textContent = '';
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    btn.addEventListener('click', async () => {
+      if (!currentFile || !currentImage) return;
+
+      btn.disabled = true;
+      statusEl.textContent = 'Sending to Gemini...';
+
+      // Detect blue square by scanning pixels
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const pixels = imageData.data;
+      let blueX = 0, blueY = 0, blueCount = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const i = (y * canvas.width + x) * 4;
+          const r = pixels[i], g = pixels[i+1], b = pixels[i+2];
+          // Detect bright blue pixels (high blue, low red/green)
+          if (b > 150 && r < 100 && g < 100) {
+            blueX += x;
+            blueY += y;
+            blueCount++;
+          }
+        }
+      }
+      let startHint = null;
+      if (blueCount > 0) {
+        startHint = { x: Math.round(blueX / blueCount), y: Math.round(blueY / blueCount) };
+        statusEl.textContent = `Blue square detected at (${startHint.x}, ${startHint.y}). Sending to Gemini...`;
+      }
+
+      const formData = new FormData();
+      formData.append('file', currentFile);
+      if (startHint) {
+        formData.append('start_x', startHint.x);
+        formData.append('start_y', startHint.y);
+      }
+
+      try {
+        const res = await fetch('/tracePath', { method: 'POST', body: formData });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Server error: ${res.status}`);
+        }
+        const data = await res.json();
+
+        // Redraw image
+        ctx.drawImage(currentImage, 0, 0);
+
+        // Draw obstacle bounding boxes
+        if (data.obstacles) {
+          ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          for (const obs of data.obstacles) {
+            ctx.strokeRect(obs.x_min, obs.y_min, obs.x_max - obs.x_min, obs.y_max - obs.y_min);
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+            ctx.fillRect(obs.x_min, obs.y_min, obs.x_max - obs.x_min, obs.y_max - obs.y_min);
+          }
+          ctx.setLineDash([]);
+        }
+
+        // Draw path
+        const points = [data.start, ...data.waypoints, data.end];
+
+        // Draw lines
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
+
+        // Draw waypoints
+        for (let i = 0; i < points.length; i++) {
+          const p = points[i];
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          if (i === 0) {
+            ctx.fillStyle = '#00aaff'; // start = blue
+          } else if (i === points.length - 1) {
+            ctx.fillStyle = '#ff4444'; // end = red
+          } else {
+            ctx.fillStyle = '#00ff00'; // waypoint = green
+          }
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+
+        statusEl.textContent = `Path traced: ${points.length} points (${data.obstacles?.length || 0} obstacles detected)`;
+        descEl.textContent = data.description || '';
+      } catch (err) {
+        statusEl.textContent = `Error: ${err.message}`;
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

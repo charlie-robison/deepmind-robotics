@@ -1,31 +1,27 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Form, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import json
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from tool_calls.depth import DepthResult
 from tool_calls.three_js import camera_update, update_position as _update_position, update_rotation as _update_rotation
 from tool_calls.mcp import start_mcp_session
+from tool_calls.gemini_path import trace_path
 from database import init_db
 from models import Environment, Pose, Trajectory, ActivityLog
 from ws_manager import ws_manager
 
 app = FastAPI(title="Robotics Vision API")
 
+# Serve the project root so the GLB file is accessible at /static/cozy_living_room_baked.glb
 _project_root = Path(__file__).resolve().parent.parent
-
-
-@app.get("/client", response_class=HTMLResponse)
-async def serve_client():
-    html_path = _project_root / "server" / "example_client.html"
-    return HTMLResponse(content=html_path.read_text(), status_code=200)
-
-
-# Serve static assets (GLB models, etc.) from the project root
 app.mount("/static", StaticFiles(directory=str(_project_root)), name="static")
 
 
@@ -39,14 +35,15 @@ class ImageRequest(BaseModel):
     target_object: str = ""
 
 class PositionRequest(BaseModel):
-    dx: float
-    dy: float
-    dz: float
+    x: float
+    y: float
+    z: float
 
 class RotationRequest(BaseModel):
-    dx: float  ## Euler delta rotation around X (pitch)
-    dy: float  ## Euler delta rotation around Y (yaw)
-    dz: float  ## Euler delta rotation around Z (roll)
+    x: float
+    y: float
+    z: float
+    w: float ## By how much to rotate.
 
 class CameraRequest(BaseModel):
     zoom_percentage: float
@@ -104,13 +101,21 @@ class LogResponse(BaseModel):
     pose_fk: str | None
     base64_image: str | None
 
+@app.get("/")
+async def root():
+    return FileResponse(Path(__file__).parent / "example_client.html")
+
+@app.get("/client")
+async def client_page():
+    return FileResponse(Path(__file__).parent / "example_client.html")
+
+@app.get("/button")
+async def button_page():
+    return FileResponse(Path(__file__).parent / "button_page.html")
+
 @app.get("/overshoot-key")
 async def overshoot_key():
     return {"key": os.environ.get("OVERSHOOT_API", "")}
-
-@app.get("/")
-async def root():
-    return {"message": "Robotics Vision API is running"}
 
 @app.get("/health")
 async def health():
@@ -199,14 +204,31 @@ async def websocket_endpoint(ws: WebSocket):
 ## TOOL CALLS FOR MCP
 @app.post("/updatePosition")
 async def update_position(request: PositionRequest) -> DepthResult:
-    return await _update_position(request.dx, request.dy, request.dz)
+    return await _update_position(request.x, request.y, request.z)
 
 
 @app.post("/updateRotation")
 async def update_rotation(request: RotationRequest) -> DepthResult:
-    return await _update_rotation(request.dx, request.dy, request.dz)
+    return await _update_rotation(request.x, request.y, request.z, request.w)
 
 
 @app.post("/updateCamera")
 async def update_camera(request: CameraRequest) -> DepthResult:
     return await camera_update(request.zoom_percentage)
+
+
+@app.post("/tracePath")
+async def trace_path_endpoint(
+    file: UploadFile = File(...),
+    start_x: int | None = Form(None),
+    start_y: int | None = Form(None),
+    obstacles: str | None = Form(None),
+):
+    image_bytes = await file.read()
+    mime = file.content_type or "image/png"
+    start_hint = None
+    if start_x is not None and start_y is not None:
+        start_hint = {"x": start_x, "y": start_y}
+    precomputed = json.loads(obstacles) if obstacles else None
+    result = await trace_path(image_bytes, mime, start_hint=start_hint, precomputed_obstacles=precomputed)
+    return result

@@ -99,9 +99,15 @@
 
     // Load cozy living room GLB as environment
     const gltfLoader = new GLTFLoader();
+    let loadedGltfScene = null;
     gltfLoader.load('/static/cozy_living_room_baked.glb', (gltf) => {
       scene.add(gltf.scene);
+      loadedGltfScene = gltf.scene;
       log('Loaded cozy living room environment');
+      requestAnimationFrame(() => {
+        computeSceneObstacles(gltf.scene);
+        callGeminiPath();
+      });
     }, undefined, (err) => {
       log(`Error loading GLB: ${err.message}`);
     });
@@ -122,15 +128,42 @@
 
     let useFirstPerson = true; // default to first-person view
 
-    // Top-down mini-map
-    const topdownSize = 500;
-    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true });
-    topdownRenderer.setSize(topdownSize, topdownSize);
-    document.getElementById('topdown').appendChild(topdownRenderer.domElement);
+    // Top-down mini-map — camera fits to room model
+    const topdownEl = document.getElementById('topdown');
 
-    const topdownCamera = new THREE.OrthographicCamera(-4, 4, 4, -4, 0.1, 100);
+    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    topdownEl.appendChild(topdownRenderer.domElement);
+
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+    topdownEl.appendChild(overlayCanvas);
+    const overlayCtx = overlayCanvas.getContext('2d');
+
+    const topdownCamera = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.1, 100);
     topdownCamera.position.set(0, 20, 0);
     topdownCamera.lookAt(0, 0, 0);
+
+    // Room bounds (hardcoded to match the actual room walls)
+    const camLeft = -3.1, camRight = 2.5, camTop = -3.5, camBottom = 4.4;
+    const worldW = camRight - camLeft;  // 8
+    const worldH = camBottom - camTop;  // 8
+    const tdW = 500, tdH = Math.round(500 * (worldH / worldW));
+
+    topdownRenderer.setSize(tdW, tdH);
+    overlayCanvas.width = tdW;
+    overlayCanvas.height = tdH;
+    topdownEl.style.width = tdW + 'px';
+    topdownEl.style.height = tdH + 'px';
+
+    topdownCamera.left = -worldW / 2;
+    topdownCamera.right = worldW / 2;
+    topdownCamera.top = worldH / 2;
+    topdownCamera.bottom = -worldH / 2;
+    const camCx = (camLeft + camRight) / 2;
+    const camCz = (camTop + camBottom) / 2;
+    topdownCamera.position.set(camCx, 20, camCz);
+    topdownCamera.lookAt(camCx, 0, camCz);
+    topdownCamera.updateProjectionMatrix();
 
     // Animation loop
     function animate() {
@@ -139,8 +172,9 @@
       const activeCamera = useFirstPerson ? fpCamera : camera;
       renderer.render(scene, activeCamera);
 
-      // Render top-down view of entire scene
+      scene.background = new THREE.Color(0x000000);
       topdownRenderer.render(scene, topdownCamera);
+      scene.background = new THREE.Color(0x1a1a2e);
     }
     animate();
 
@@ -170,34 +204,11 @@
     // --- Path definition & visualization ---
     const overshootResultEl = document.getElementById('overshoot-result');
 
-    // Full path including start position (x, z in world coords)
-    const PATH_WAYPOINTS = [
-      { x: -3,   z:  4   },  // start (cube spawn)
-      { x:  3,   z:  4   },  // right along bottom
-      { x:  3,   z: -1   },  // up the right side
-      { x:  0.5, z: -1   },  // left across middle
-      { x:  0.5, z: -3   },  // up to top area
-      { x: -2,   z: -3   },  // left to top-left
-    ];
-    let currentWaypointIdx = 1; // start heading toward index 1
+    let PATH_WAYPOINTS = [];
+    let currentWaypointIdx = 1;
     const WAYPOINT_THRESHOLD = 0.3;
     const STEP_SIZE = 0.25;
-
-    // Draw path lines in the scene (visible from top-down)
-    const pathY = 0.05; // just above the floor
-    const pathPoints = PATH_WAYPOINTS.map(wp => new THREE.Vector3(wp.x, pathY, wp.z));
-    const pathGeom = new THREE.BufferGeometry().setFromPoints(pathPoints);
-    const pathLine = new THREE.Line(pathGeom, new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 }));
-    scene.add(pathLine);
-
-    // Draw dots at each waypoint
-    PATH_WAYPOINTS.forEach((wp, i) => {
-      const dotGeo = new THREE.SphereGeometry(0.08, 8, 8);
-      const dotMat = new THREE.MeshBasicMaterial({ color: i === 0 ? 0x0088ff : 0x00ff00 });
-      const dot = new THREE.Mesh(dotGeo, dotMat);
-      dot.position.set(wp.x, pathY + 0.05, wp.z);
-      scene.add(dot);
-    });
+    const pathY = 0.05;
 
     // Trail: track where the cube has actually been
     const trailPoints = [cube.position.clone()];
@@ -210,9 +221,211 @@
       trailGeom.setFromPoints(trailPoints);
     }
 
+    function drawPath() {
+      const pathPoints = PATH_WAYPOINTS.map(wp => new THREE.Vector3(wp.x, pathY, wp.z));
+      const pathGeom = new THREE.BufferGeometry().setFromPoints(pathPoints);
+      const pathLine = new THREE.Line(pathGeom, new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 }));
+      scene.add(pathLine);
+
+      PATH_WAYPOINTS.forEach((wp, i) => {
+        const dotGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        const dotMat = new THREE.MeshBasicMaterial({ color: i === 0 ? 0x0088ff : 0x00ff00 });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.set(wp.x, pathY + 0.05, wp.z);
+        scene.add(dot);
+      });
+    }
+
+    function drawOverlay(result) {
+      overlayCtx.clearRect(0, 0, tdW, tdH);
+
+      // Scale factor in case Gemini dimensions differ from canvas
+      const scX = tdW / (result.image_width || tdW);
+      const scY = tdH / (result.image_height || tdH);
+      const s = (p) => ({ x: p.x * scX, y: p.y * scY });
+
+      // Draw obstacle bounding boxes
+      if (result.obstacles) {
+        overlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([6, 4]);
+        for (const obs of result.obstacles) {
+          const x = obs.x_min * scX, y = obs.y_min * scY;
+          const w = (obs.x_max - obs.x_min) * scX, h = (obs.y_max - obs.y_min) * scY;
+          overlayCtx.strokeRect(x, y, w, h);
+          overlayCtx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+          overlayCtx.fillRect(x, y, w, h);
+        }
+        overlayCtx.setLineDash([]);
+      }
+
+      // Draw path line
+      const points = [result.start, ...result.waypoints, result.end].map(s);
+      overlayCtx.strokeStyle = '#00ff00';
+      overlayCtx.lineWidth = 3;
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        overlayCtx.lineTo(points[i].x, points[i].y);
+      }
+      overlayCtx.stroke();
+
+      // Draw waypoint dots
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        overlayCtx.beginPath();
+        overlayCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        if (i === 0) {
+          overlayCtx.fillStyle = '#00aaff';
+        } else if (i === points.length - 1) {
+          overlayCtx.fillStyle = '#ff4444';
+        } else {
+          overlayCtx.fillStyle = '#00ff00';
+        }
+        overlayCtx.fill();
+        overlayCtx.strokeStyle = '#fff';
+        overlayCtx.lineWidth = 1;
+        overlayCtx.stroke();
+      }
+    }
+
+    function draw3DObstacles(result) {
+      if (!result.obstacles) return;
+      const obsMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.15 });
+      const edgeMat = new THREE.LineBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5 });
+      for (const obs of result.obstacles) {
+        const tl = pixelToWorld(obs.x_min, obs.y_min);
+        const br = pixelToWorld(obs.x_max, obs.y_max);
+        const w = br.x - tl.x;
+        const d = br.z - tl.z;
+        const geo = new THREE.BoxGeometry(w, 1.5, d);
+        const mesh = new THREE.Mesh(geo, obsMat);
+        mesh.position.set(tl.x + w / 2, 0.75, tl.z + d / 2);
+        scene.add(mesh);
+        const edges = new THREE.EdgesGeometry(geo);
+        const line = new THREE.LineSegments(edges, edgeMat);
+        line.position.copy(mesh.position);
+        scene.add(line);
+      }
+    }
+
+    // Coordinate conversion using actual camera bounds
+    function worldToPixel(wx, wz) {
+      return {
+        x: Math.round(((wx - camLeft) / (camRight - camLeft)) * tdW),
+        y: Math.round(((wz - camTop) / (camBottom - camTop)) * tdH),
+      };
+    }
+
+    function pixelToWorld(px, py) {
+      return {
+        x: (px / tdW) * (camRight - camLeft) + camLeft,
+        z: (py / tdH) * (camBottom - camTop) + camTop,
+      };
+    }
+
+    // Compute obstacle bounding boxes from actual 3D scene geometry
+    let sceneObstacles = [];
+    function computeSceneObstacles(gltfScene) {
+      const padding = 12; // pixels
+      const boxes = [];
+      // Max footprint fraction — skip objects covering more than 60% of the view (floors, walls, ceilings)
+      const maxFootprint = tdW * tdH * 0.6;
+
+      // Collect all meshes in the scene
+      const candidates = [];
+      gltfScene.traverse((obj) => {
+        if (obj.isMesh) candidates.push(obj);
+      });
+
+      log(`Scene has ${candidates.length} meshes total`);
+
+      for (const mesh of candidates) {
+        const box = new THREE.Box3().setFromObject(mesh);
+        if (box.isEmpty()) continue;
+        // Skip objects entirely above head height (ceiling lights, etc.)
+        if (box.min.y > 2.0) continue;
+        // Skip flat horizontal objects at floor level (floor planes: very thin in Y, very wide in XZ)
+        const yExtent = box.max.y - box.min.y;
+        const xExtent = box.max.x - box.min.x;
+        const zExtent = box.max.z - box.min.z;
+        if (yExtent < 0.05 && xExtent > 3 && zExtent > 3) continue;
+
+        const min = worldToPixel(box.min.x, box.min.z);
+        const max = worldToPixel(box.max.x, box.max.z);
+        const x_min = Math.max(0, Math.min(min.x, max.x) - padding);
+        const y_min = Math.max(0, Math.min(min.y, max.y) - padding);
+        const x_max = Math.min(tdW, Math.max(min.x, max.x) + padding);
+        const y_max = Math.min(tdH, Math.max(min.y, max.y) + padding);
+
+        const area = (x_max - x_min) * (y_max - y_min);
+        // Skip room-sized objects (floor, walls, ceiling)
+        if (area > maxFootprint) {
+          log(`Skipping large object: ${mesh.name || 'unnamed'} (${area.toFixed(0)}px² > ${maxFootprint.toFixed(0)}px²)`);
+          continue;
+        }
+        // Skip tiny objects (< 10px in both dimensions)
+        if (x_max - x_min < 10 && y_max - y_min < 10) continue;
+        boxes.push({ label: mesh.name || 'object', x_min, y_min, x_max, y_max });
+      }
+
+      sceneObstacles = boxes;
+      log(`Computed ${sceneObstacles.length} obstacle boxes from scene geometry`);
+      return sceneObstacles;
+    }
+
+    async function callGeminiPath() {
+      overshootResultEl.textContent = 'Generating path with Gemini...';
+      log('Capturing top-down view for Gemini path planning...');
+
+      try {
+        topdownRenderer.render(scene, topdownCamera);
+        const blob = await new Promise(resolve => topdownRenderer.domElement.toBlob(resolve, 'image/png'));
+
+        const startPixel = worldToPixel(cube.position.x, cube.position.z);
+        log(`Cube start at pixel (${startPixel.x}, ${startPixel.y})`);
+
+        const form = new FormData();
+        form.append('file', blob, 'topdown.png');
+        form.append('start_x', startPixel.x);
+        form.append('start_y', startPixel.y);
+        if (sceneObstacles.length > 0) {
+          form.append('obstacles', JSON.stringify(sceneObstacles));
+        }
+
+        const resp = await fetch('/tracePath', { method: 'POST', body: form });
+        if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+        const result = await resp.json();
+
+        // Use client-computed obstacles for overlay if available
+        const overlayObstacles = sceneObstacles.length > 0 ? sceneObstacles : result.obstacles;
+
+        // Scale waypoints from response dimensions to canvas dimensions before converting to world
+        const rScX = tdW / (result.image_width || tdW);
+        const rScY = tdH / (result.image_height || tdH);
+        const geminiWaypoints = result.waypoints.map(wp => pixelToWorld(wp.x * rScX, wp.y * rScY));
+        PATH_WAYPOINTS = [
+          { x: cube.position.x, z: cube.position.z },
+          ...geminiWaypoints,
+        ];
+        currentWaypointIdx = 1;
+
+        log(`Gemini dims: ${result.image_width}x${result.image_height}, canvas: ${tdW}x${tdH}`);
+        log(`Gemini path: ${PATH_WAYPOINTS.length} waypoints, avoiding ${overlayObstacles.length} obstacles`);
+        drawPath();
+        drawOverlay({ ...result, obstacles: overlayObstacles });
+        // draw3DObstacles(result);
+        initOvershoot();
+      } catch (err) {
+        overshootResultEl.textContent = `Path generation failed: ${err.message}`;
+        log(`Gemini path error: ${err.message}`);
+      }
+    }
+
     // Rotate cube so the FP camera (local -Z) faces the final goal
-    const GOAL = PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
     function faceGoal() {
+      const GOAL = PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
+      if (!GOAL) return 0;
       const dx = GOAL.x - cube.position.x;
       const dz = GOAL.z - cube.position.z;
       // atan2(x, z) gives angle from +Z; camera faces -Z, so add PI
@@ -389,8 +602,6 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
         log(`Overshoot init failed: ${err.message}`);
       }
     }
-
-    initOvershoot();
 
     // WebSocket connection
     function connect() {
