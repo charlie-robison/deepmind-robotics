@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gaussian Splat Viewer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 100;
+        }
+        #progress {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: monospace;
+            font-size: 24px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>Gaussian Splat Viewer</strong><br>
+        Drag: rotate | Scroll: zoom | Right-drag: pan
+    </div>
+    <div id="progress">Loading splat data...</div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.164.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.164.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as GaussianSplats3D from 'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.6/build/gaussian-splats-3d.module.min.js';
+
+        const progress = document.getElementById('progress');
+
+        const viewer = new GaussianSplats3D.Viewer({
+            cameraUp: [0, 1, 0],
+            initialCameraPosition: [0, 2, 8],
+            initialCameraLookAt: [0, 0, 0],
+            sphericalHarmonicsDegree: 2,
+            dynamicScene: false,
+        });
+
+        viewer.addSplatScene('safety_park_output.ply', {
+            splatAlphaRemovalThreshold: 5,
+            showLoadingUI: true,
+            progressiveLoad: true,
+            onProgress: (percent, message) => {
+                progress.textContent = `Loading: ${(percent * 100).toFixed(1)}%\n${message || ''}`;
+            }
+        })
+        .then(() => {
+            progress.style.display = 'none';
+            viewer.start();
+        })
+        .catch((err) => {
+            progress.textContent = `Error: ${err.message}`;
+            console.error(err);
+        });
+    </script>
+</body>
+</html>

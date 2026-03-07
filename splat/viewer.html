@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gaussian Splat Viewer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Loading Gaussian Splat...<br>Drag to rotate, scroll to zoom</div>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x111111);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        camera.position.set(0, 2, 5);
+
+        // Add lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 10, 10);
+        scene.add(directionalLight);
+
+        // Load PLY
+        const loader = new PLYLoader();
+        loader.load('safety_park_output.ply', (geometry) => {
+            geometry.computeVertexNormals();
+
+            const material = new THREE.PointsMaterial({
+                size: 0.01,
+                vertexColors: geometry.hasAttribute('color'),
+                color: geometry.hasAttribute('color') ? undefined : 0x00ff88
+            });
+
+            const points = new THREE.Points(geometry, material);
+
+            // Center the model
+            geometry.computeBoundingBox();
+            const center = new THREE.Vector3();
+            geometry.boundingBox.getCenter(center);
+            points.position.sub(center);
+
+            scene.add(points);
+
+            // Update camera
+            const size = new THREE.Vector3();
+            geometry.boundingBox.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            camera.position.set(0, maxDim * 0.5, maxDim * 1.5);
+
+            document.getElementById('info').innerHTML =
+                `Loaded: ${geometry.attributes.position.count.toLocaleString()} points<br>` +
+                `Drag to rotate, scroll to zoom`;
+        },
+        (progress) => {
+            const pct = (progress.loaded / progress.total * 100).toFixed(1);
+            document.getElementById('info').innerHTML = `Loading... ${pct}%`;
+        },
+        (error) => {
+            document.getElementById('info').innerHTML = `Error: ${error.message}`;
+            console.error(error);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

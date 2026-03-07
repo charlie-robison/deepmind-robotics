@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+.pnp.*
+.yarn/*
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+
+# Environment files
+.env
+.env.*
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Large files (use Git LFS for these if needed)
+*.ply
+*.obj
+*.glb
+*.gltf
+*.splat
+
+# Model checkpoints
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Debug
+.pnpm-debug.log*
+
+# Testing
+coverage/
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+
+# Claude
+.claude/
