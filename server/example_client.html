@@ -16,11 +16,24 @@
       background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px;
       max-height: 200px; overflow-y: auto; width: 400px;
     }
+    #topdown {
+      position: fixed; top: 10px; right: 10px; z-index: 10;
+      border: 2px solid rgba(255,255,255,0.3); border-radius: 6px;
+      overflow: hidden;
+    }
+    #topdown-label {
+      position: fixed; top: 14px; right: 60px; z-index: 11;
+      color: #fff; font-family: monospace; font-size: 11px;
+      background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <div id="status">Connecting...</div>
   <div id="log"></div>
+  <div id="topdown"></div>
+  <div id="topdown-label">Top Down</div>
 
   <script type="importmap">
     {
@@ -34,6 +47,7 @@
   <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
@@ -59,39 +73,80 @@
 
     const controls = new OrbitControls(camera, renderer.domElement);
 
-    // Grid and axes
-    scene.add(new THREE.GridHelper(10, 10, 0x444444, 0x222222));
-    scene.add(new THREE.AxesHelper(3));
-
     // Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1);
     dirLight.position.set(5, 10, 7);
     scene.add(dirLight);
 
+    // Load cozy living room GLB as environment
+    const gltfLoader = new GLTFLoader();
+    gltfLoader.load('/static/cozy_living_room_baked.glb', (gltf) => {
+      scene.add(gltf.scene);
+      log('Loaded cozy living room environment');
+    }, undefined, (err) => {
+      log(`Error loading GLB: ${err.message}`);
+    });
+
     // Object to move
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const geometry = new THREE.BoxGeometry(0.2, 0.8, 0.2);
     const material = new THREE.MeshStandardMaterial({ color: 0x4488ff });
     const cube = new THREE.Mesh(geometry, material);
+    cube.position.set(-3, 0.4, 4); // left side, further back
     scene.add(cube);
+
+    // First-person camera attached to the cube
+    const fpCamera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.01, 1000);
+    cube.add(fpCamera);
+    fpCamera.position.set(0, 0.4, 0); // on top of the cube's head
+    fpCamera.lookAt(new THREE.Vector3(0, 0.4, -1)); // look forward (-Z)
+    // Store the local forward direction
+    const fpForward = new THREE.Vector3(0, 0, -1);
+
+    let useFirstPerson = true; // default to first-person view
+
+    // Top-down mini-map
+    const topdownSize = 500;
+    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true });
+    topdownRenderer.setSize(topdownSize, topdownSize);
+    document.getElementById('topdown').appendChild(topdownRenderer.domElement);
+
+    const topdownCamera = new THREE.OrthographicCamera(-4, 4, 4, -4, 0.1, 100);
+    topdownCamera.position.set(0, 20, 0);
+    topdownCamera.lookAt(0, 0, 0);
 
     // Animation loop
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
-      renderer.render(scene, camera);
+      const activeCamera = useFirstPerson ? fpCamera : camera;
+      renderer.render(scene, activeCamera);
+
+      // Render top-down view of entire scene
+      topdownRenderer.render(scene, topdownCamera);
     }
     animate();
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
+      fpCamera.aspect = window.innerWidth / window.innerHeight;
+      fpCamera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // Take a screenshot and return base64
+    // Toggle between first-person and orbit camera with 'V' key
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'v' || e.key === 'V') {
+        useFirstPerson = !useFirstPerson;
+        controls.enabled = !useFirstPerson;
+        log(`Camera: ${useFirstPerson ? 'First Person' : 'Orbit'}`);
+      }
+    });
+
+    // Take a screenshot from the first-person camera
     function screenshot() {
-      renderer.render(scene, camera);
+      renderer.render(scene, fpCamera);
       return renderer.domElement.toDataURL('image/png');
     }
 
@@ -111,8 +166,10 @@
 
         switch (cmd.action) {
           case 'updatePosition':
-            cube.position.set(cmd.x, cmd.y, cmd.z);
-            log(`Moved cube to (${cmd.x}, ${cmd.y}, ${cmd.z})`);
+            cube.position.x += cmd.dx;
+            cube.position.y += cmd.dy;
+            cube.position.z += cmd.dz;
+            log(`Moved cube by (${cmd.dx}, ${cmd.dy}, ${cmd.dz}) → (${cube.position.x.toFixed(2)}, ${cube.position.y.toFixed(2)}, ${cube.position.z.toFixed(2)})`);
             break;
 
           case 'updateRotation':
@@ -121,11 +178,20 @@
             break;
 
           case 'cameraUpdate':
-            const zoom = cmd.zoomPercentage / 100;
-            const distance = 3 + (1 - zoom) * 10;
-            camera.position.normalize().multiplyScalar(distance);
-            camera.lookAt(0, 0, 0);
-            log(`Camera zoom: ${cmd.zoomPercentage}%`);
+            if (cmd.view === 'firstperson') {
+              useFirstPerson = true;
+              controls.enabled = false;
+            } else if (cmd.view === 'orbit') {
+              useFirstPerson = false;
+              controls.enabled = true;
+            }
+            if (cmd.zoomPercentage !== undefined) {
+              const zoom = cmd.zoomPercentage / 100;
+              const distance = 3 + (1 - zoom) * 10;
+              camera.position.normalize().multiplyScalar(distance);
+              camera.lookAt(0, 0, 0);
+            }
+            log(`Camera update — view: ${useFirstPerson ? 'FP' : 'orbit'}`);
             break;
 
           default:
@@ -133,7 +199,7 @@
         }
 
         // Render one frame then send screenshot back
-        renderer.render(scene, camera);
+        renderer.render(scene, fpCamera);
         requestAnimationFrame(() => {
           const image = screenshot();
           ws.send(JSON.stringify({ image }));

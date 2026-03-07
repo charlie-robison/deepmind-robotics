@@ -3,29 +3,30 @@ from models import Pose, ActivityLog
 from ws_manager import ws_manager
 
 
-async def update_position(x: float, y: float, z: float) -> DepthResult:
+async def update_position(dx: float, dy: float, dz: float) -> DepthResult:
     """
-    Updates the position of the camera in the 3D scene and logs the activity.
+    Moves the object by the given delta units relative to its current position.
 
-    :param x: The new x-coordinate of the camera position.
-    :param y: The new y-coordinate of the camera position.
-    :param z: The new z-coordinate of the camera position.
+    :param dx: Units to move along the x-axis.
+    :param dy: Units to move along the y-axis.
+    :param dz: Units to move along the z-axis.
     :return: DepthResult containing the generated depth map and the original image.
     """
-    image: str = await ws_manager.send_command("updatePosition", {"x": x, "y": y, "z": z})
+    image: str = await ws_manager.send_command("updatePosition", {"dx": dx, "dy": dy, "dz": dz})
 
     # Generates depth map for the image and returns both the depth map and the original image.
     depth_map_object: DepthResult = generate_depth_map(image)
 
     # Save position change in DB.
     last_pose = await Pose.find_all().sort("-timestamp").first_or_none()
+    prev_x = last_pose.xPos if last_pose else 0
+    prev_y = last_pose.yPos if last_pose else 0
+    prev_z = last_pose.zPos if last_pose else 0
     pose = Pose(
         iteration_num=(last_pose.iteration_num + 1) if last_pose else 0,
         trajectory_fk=last_pose.trajectory_fk if last_pose else None,
-        xPos=x, yPos=y, zPos=z,
-        deltaX=(x - last_pose.xPos) if last_pose else 0,
-        deltaY=(y - last_pose.yPos) if last_pose else 0,
-        deltaZ=(z - last_pose.zPos) if last_pose else 0,
+        xPos=prev_x + dx, yPos=prev_y + dy, zPos=prev_z + dz,
+        deltaX=dx, deltaY=dy, deltaZ=dz,
     )
     await pose.insert()
 

@@ -1,6 +1,9 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from datetime import datetime
+from pathlib import Path
 import json
 
 from tool_calls.depth import DepthResult
@@ -11,6 +14,18 @@ from models import Environment, Pose, Trajectory, ActivityLog
 from ws_manager import ws_manager
 
 app = FastAPI(title="Robotics Vision API")
+
+_project_root = Path(__file__).resolve().parent.parent
+
+
+@app.get("/client", response_class=HTMLResponse)
+async def serve_client():
+    html_path = _project_root / "server" / "example_client.html"
+    return HTMLResponse(content=html_path.read_text(), status_code=200)
+
+
+# Serve static assets (GLB models, etc.) from the project root
+app.mount("/static", StaticFiles(directory=str(_project_root)), name="static")
 
 
 @app.on_event("startup")
@@ -23,9 +38,9 @@ class ImageRequest(BaseModel):
     target_object: str = ""
 
 class PositionRequest(BaseModel):
-    x: float
-    y: float
-    z: float
+    dx: float
+    dy: float
+    dz: float
 
 class RotationRequest(BaseModel):
     x: float
@@ -180,7 +195,7 @@ async def websocket_endpoint(ws: WebSocket):
 ## TOOL CALLS FOR MCP
 @app.post("/updatePosition")
 async def update_position(request: PositionRequest) -> DepthResult:
-    return await _update_position(request.x, request.y, request.z)
+    return await _update_position(request.dx, request.dy, request.dz)
 
 
 @app.post("/updateRotation")
