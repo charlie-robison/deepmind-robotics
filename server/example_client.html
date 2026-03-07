@@ -117,14 +117,13 @@
     const fpCamera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.01, 1000);
     cube.add(fpCamera);
     fpCamera.position.set(0, 0.4, 0); // on top of the cube's head
-    // fpCamera faces local -Z by default (no lookAt needed, it inherits cube rotation)
     fpCamera.rotation.set(0, 0, 0);
 
-    let useFirstPerson = true; // default to first-person view
+    let useFirstPerson = true;
 
     // Top-down mini-map
     const topdownSize = 500;
-    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true });
+    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     topdownRenderer.setSize(topdownSize, topdownSize);
     document.getElementById('topdown').appendChild(topdownRenderer.domElement);
 
@@ -138,8 +137,6 @@
       controls.update();
       const activeCamera = useFirstPerson ? fpCamera : camera;
       renderer.render(scene, activeCamera);
-
-      // Render top-down view of entire scene
       topdownRenderer.render(scene, topdownCamera);
     }
     animate();
@@ -152,7 +149,6 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // Toggle between first-person and orbit camera with 'V' key
     window.addEventListener('keydown', (e) => {
       if (e.key === 'v' || e.key === 'V') {
         useFirstPerson = !useFirstPerson;
@@ -161,17 +157,18 @@
       }
     });
 
-    // Take a screenshot from the first-person camera
     function screenshot() {
       renderer.render(scene, fpCamera);
       return renderer.domElement.toDataURL('image/png');
     }
 
-    // --- Path definition & visualization ---
+    // =========================================================================
+    // PATH DEFINITION & VISUALIZATION
+    // =========================================================================
     const overshootResultEl = document.getElementById('overshoot-result');
 
-    // Full path including start position (x, z in world coords)
-    const PATH_WAYPOINTS = [
+    // Default path waypoints (will be replaced by VLM-planned safe path)
+    let PATH_WAYPOINTS = [
       { x: -3,   z:  4   },  // start (cube spawn)
       { x:  3,   z:  4   },  // right along bottom
       { x:  3,   z: -1   },  // up the right side
@@ -179,25 +176,35 @@
       { x:  0.5, z: -3   },  // up to top area
       { x: -2,   z: -3   },  // left to top-left
     ];
-    let currentWaypointIdx = 1; // start heading toward index 1
+    let currentWaypointIdx = 1;
     const WAYPOINT_THRESHOLD = 0.3;
     const STEP_SIZE = 0.25;
+    const pathY = 0.05;
 
-    // Draw path lines in the scene (visible from top-down)
-    const pathY = 0.05; // just above the floor
-    const pathPoints = PATH_WAYPOINTS.map(wp => new THREE.Vector3(wp.x, pathY, wp.z));
-    const pathGeom = new THREE.BufferGeometry().setFromPoints(pathPoints);
-    const pathLine = new THREE.Line(pathGeom, new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 }));
-    scene.add(pathLine);
+    // Path visualization objects (recreated when path changes)
+    let pathLine = null;
+    let waypointDots = [];
 
-    // Draw dots at each waypoint
-    PATH_WAYPOINTS.forEach((wp, i) => {
-      const dotGeo = new THREE.SphereGeometry(0.08, 8, 8);
-      const dotMat = new THREE.MeshBasicMaterial({ color: i === 0 ? 0x0088ff : 0x00ff00 });
-      const dot = new THREE.Mesh(dotGeo, dotMat);
-      dot.position.set(wp.x, pathY + 0.05, wp.z);
-      scene.add(dot);
-    });
+    function drawPath() {
+      if (pathLine) scene.remove(pathLine);
+      waypointDots.forEach(d => scene.remove(d));
+      waypointDots = [];
+
+      const pathPoints = PATH_WAYPOINTS.map(wp => new THREE.Vector3(wp.x, pathY, wp.z));
+      const pathGeom = new THREE.BufferGeometry().setFromPoints(pathPoints);
+      pathLine = new THREE.Line(pathGeom, new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 }));
+      scene.add(pathLine);
+
+      PATH_WAYPOINTS.forEach((wp, i) => {
+        const dotGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        const dotMat = new THREE.MeshBasicMaterial({ color: i === 0 ? 0x0088ff : 0x00ff00 });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.set(wp.x, pathY + 0.05, wp.z);
+        scene.add(dot);
+        waypointDots.push(dot);
+      });
+    }
+    drawPath();
 
     // Trail: track where the cube has actually been
     const trailPoints = [cube.position.clone()];
@@ -210,20 +217,104 @@
       trailGeom.setFromPoints(trailPoints);
     }
 
-    // Rotate cube so the FP camera (local -Z) faces the final goal
-    const GOAL = PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
+    // Rotate cube so the FP camera faces the final goal
     function faceGoal() {
-      const dx = GOAL.x - cube.position.x;
-      const dz = GOAL.z - cube.position.z;
-      // atan2(x, z) gives angle from +Z; camera faces -Z, so add PI
+      const goal = PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
+      const dx = goal.x - cube.position.x;
+      const dz = goal.z - cube.position.z;
       const targetYaw = Math.atan2(dx, dz) + Math.PI;
       let diff = targetYaw - cube.rotation.y;
-      // Normalize to [-PI, PI]
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
-      cube.rotation.y += diff; // snap to target (no smoothing needed)
+      cube.rotation.y += diff;
       return diff;
     }
+
+    // =========================================================================
+    // PHASE 1: DETECT WAYPOINTS FROM IMAGE VIA SERVER (Gemini Vision)
+    // =========================================================================
+
+    // Pass a base64 image to Gemini for waypoint + obstacle detection.
+    // If no image is provided, fetches the default top-down image from the server.
+    async function detectWaypoints(base64Image = null) {
+      log('Phase 1: Loading top-down image for waypoint detection...');
+      overshootResultEl.textContent = 'Detecting waypoints from top-down image...';
+
+      // If no image provided, fetch the default one from the server
+      if (!base64Image) {
+        log('Fetching top-down path image from server...');
+        const imgResp = await fetch('/topdown-image');
+        if (!imgResp.ok) throw new Error(`Failed to fetch top-down image (${imgResp.status})`);
+        const imgData = await imgResp.json();
+        base64Image = imgData.image;
+      }
+
+      log('Sending image to Gemini for waypoint detection...');
+      const resp = await fetch('/detect-waypoints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Image }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`Detection failed (${resp.status}): ${errText}`);
+      }
+
+      const data = await resp.json();
+      log(`Detected ${data.waypoints?.length || 0} waypoints, ${data.obstacles?.length || 0} obstacles`);
+      if (data.reasoning) log(`Reasoning: ${data.reasoning}`);
+      return data;
+    }
+
+    // =========================================================================
+    // OBSTACLE VISUALIZATION (from VLM detection)
+    // =========================================================================
+    let obstacleBoxes = [];
+
+    function visualizeObstacles(obstacles) {
+      obstacleBoxes.forEach(b => scene.remove(b));
+      obstacleBoxes = [];
+
+      obstacles.forEach(obs => {
+        const w = obs.width || 1;
+        const d = obs.depth || 1;
+        // Light transparent fill
+        const geo = new THREE.PlaneGeometry(w, d);
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0xff0000, transparent: true, opacity: 0.15, side: THREE.DoubleSide,
+        });
+        const plane = new THREE.Mesh(geo, mat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.position.set(obs.center_x, 0.02, obs.center_z);
+        scene.add(plane);
+        obstacleBoxes.push(plane);
+
+        // Dashed outline rectangle on the ground
+        const halfW = w / 2, halfD = d / 2;
+        const pts = [
+          new THREE.Vector3(-halfW, 0, -halfD),
+          new THREE.Vector3( halfW, 0, -halfD),
+          new THREE.Vector3( halfW, 0,  halfD),
+          new THREE.Vector3(-halfW, 0,  halfD),
+          new THREE.Vector3(-halfW, 0, -halfD),
+        ];
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        lineGeo.computeBoundingSphere();
+        const dashMat = new THREE.LineDashedMaterial({
+          color: 0xff4444, dashSize: 0.15, gapSize: 0.1, linewidth: 1,
+        });
+        const dashLine = new THREE.Line(lineGeo, dashMat);
+        dashLine.computeLineDistances();
+        dashLine.position.set(obs.center_x, 0.03, obs.center_z);
+        scene.add(dashLine);
+        obstacleBoxes.push(dashLine);
+      });
+    }
+
+    // =========================================================================
+    // NAVIGATION FUNCTIONS
+    // =========================================================================
 
     function buildNavPrompt() {
       const pos = cube.position;
@@ -234,16 +325,18 @@
       return `You are an obstacle-avoidance system for a robot navigating a 3D room. You see the robot's first-person view.
 
 Current position: x=${pos.x.toFixed(2)}, z=${pos.z.toFixed(2)}
-Target waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}: x=${wp.x}, z=${wp.z} (distance: ${dist.toFixed(2)})
+Target waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}: x=${wp.x.toFixed(2)}, z=${wp.z.toFixed(2)} (distance: ${dist.toFixed(2)})
 Heading: ${(cube.rotation.y * 180 / Math.PI).toFixed(0)} degrees
 
-The robot is already moving toward the waypoint. Your job is to check for obstacles.
-- If the path ahead is CLEAR, output adjust_dx=0 and adjust_dz=0.
-- If you see furniture, walls, or objects blocking the path, output a small lateral adjustment (max 0.15 per axis) to steer around it.
-- "reasoning": describe what you see ahead (clear floor, furniture edge, wall, etc.)`;
+The robot is following a deterministic path detected from a top-down view.
+Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
+- If the path ahead is CLEAR of obstacles, output adjust_dx=0 and adjust_dz=0 (stay on path).
+- If you see furniture, walls, or objects BLOCKING the path ahead, output a lateral adjustment (max 0.15 per axis) to steer AROUND the obstacle temporarily.
+- Once the obstacle is passed, return to adjust_dx=0, adjust_dz=0 to rejoin the planned path.
+- Prioritize AVOIDING COLLISIONS over staying exactly on the path.
+- "reasoning": describe what you see (clear floor, obstacle on left/right, deviating to avoid, etc.)`;
     }
 
-    // Move one step toward the current waypoint, returns true if path is complete
     function stepTowardWaypoint(adjustDx = 0, adjustDz = 0) {
       const wp = PATH_WAYPOINTS[currentWaypointIdx];
       const dx = wp.x - cube.position.x;
@@ -259,27 +352,22 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
         return true; // done
       }
 
-      // Normalize direction and scale to step size
       const step = Math.min(STEP_SIZE, dist);
       let moveDx = (dx / dist) * step + adjustDx;
       let moveDz = (dz / dist) * step + adjustDz;
 
-      // Clamp total movement
       const mag = Math.hypot(moveDx, moveDz);
       if (mag > STEP_SIZE) {
         moveDx = (moveDx / mag) * STEP_SIZE;
         moveDz = (moveDz / mag) * STEP_SIZE;
       }
 
-      // Rotate to face the final goal
       const rotDy = faceGoal();
 
-      // Move
       cube.position.x += moveDx;
       cube.position.z += moveDz;
       updateTrail();
 
-      // Log to server (fire and forget)
       fetch('/updatePosition', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -297,6 +385,9 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
       return false;
     }
 
+    // =========================================================================
+    // MAIN INIT: PHASE 1 (ANALYZE) -> PHASE 2 (NAVIGATE)
+    // =========================================================================
     async function initOvershoot() {
       try {
         const keyResp = await fetch('/overshoot-key');
@@ -307,13 +398,55 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
           return;
         }
 
-        // Capture the main renderer canvas as a MediaStream
+        // ---- PHASE 1: Detect waypoints from top-down image (Gemini) ----
+        overshootResultEl.textContent = 'Detecting waypoints from top-down image...';
+        let detectionResult = null;
+        try {
+          detectionResult = await detectWaypoints();
+        } catch (err) {
+          overshootResultEl.textContent = `Waypoint detection failed: ${err.message}`;
+          log(`Waypoint detection failed: ${err.message}`);
+          return;
+        }
+
+        if (!detectionResult || !detectionResult.waypoints || detectionResult.waypoints.length < 2) {
+          overshootResultEl.textContent = 'Error: VLM returned insufficient waypoints';
+          log('VLM detection returned insufficient waypoints');
+          return;
+        }
+
+        // Use the VLM-detected waypoints as the deterministic path
+        PATH_WAYPOINTS = detectionResult.waypoints.map(wp => ({ x: wp.x, z: wp.z }));
+        log(`Loaded ${PATH_WAYPOINTS.length} waypoints from VLM detection`);
+
+        // Log each detected waypoint
+        PATH_WAYPOINTS.forEach((wp, i) => {
+          const desc = detectionResult.waypoints[i].description || '';
+          log(`  WP${i}: (${wp.x.toFixed(2)}, ${wp.z.toFixed(2)}) ${desc}`);
+        });
+
+        // Visualize detected obstacles if any
+        if (detectionResult.obstacles && detectionResult.obstacles.length > 0) {
+          visualizeObstacles(detectionResult.obstacles);
+          log(`Visualized ${detectionResult.obstacles.length} obstacles to avoid`);
+        }
+
+        // Reset navigation state and redraw path
+        currentWaypointIdx = 1;
+        drawPath();
+        log(`Final path: ${PATH_WAYPOINTS.map(w => `(${w.x.toFixed(1)},${w.z.toFixed(1)})`).join(' -> ')}`);
+
+        // Small delay so the user can see the planned path before navigation starts
+        await new Promise(r => setTimeout(r, 2000));
+
+        // ---- PHASE 2: Navigate with real-time obstacle avoidance ----
+        log('Phase 2: Starting real-time navigation with Overshoot...');
         const canvasStream = renderer.domElement.captureStream(10);
 
-        const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        const origGUM2 = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
           if (constraints && constraints.video) return canvasStream;
-          return originalGetUserMedia(constraints);
+          return origGUM2(constraints);
         };
 
         const vision = new RealtimeVision({
@@ -332,7 +465,6 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
           },
           onResult: (result) => {
             if (!result.ok) {
-              // Still move deterministically even if VLM errors
               const done = stepTowardWaypoint();
               if (done) { vision.stop(); overshootResultEl.textContent = 'Path complete!'; return; }
               overshootResultEl.textContent = `VLM error (still moving): ${result.error || 'unknown'}`;
@@ -346,14 +478,12 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
               if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
               cmd = JSON.parse(raw);
             } catch {
-              // Parse failed — move without adjustment
               const done = stepTowardWaypoint();
               if (done) { vision.stop(); overshootResultEl.textContent = 'Path complete!'; return; }
               vision.updatePrompt(buildNavPrompt());
               return;
             }
 
-            // Clamp obstacle-avoidance adjustments
             const adjDx = Math.max(-0.15, Math.min(0.15, cmd.adjust_dx || 0));
             const adjDz = Math.max(-0.15, Math.min(0.15, cmd.adjust_dz || 0));
 
@@ -363,7 +493,7 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
             const dist = Math.hypot(cube.position.x - wp.x, cube.position.z - wp.z);
             const wpLabel = `WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`;
             overshootResultEl.textContent = `${wpLabel} | dist:${dist.toFixed(2)} adj:(${adjDx.toFixed(2)},${adjDz.toFixed(2)})\n${cmd.reasoning || ''}`;
-            log(`Nav → (${cube.position.x.toFixed(2)}, ${cube.position.z.toFixed(2)}) | ${cmd.reasoning || ''}`);
+            log(`Nav -> (${cube.position.x.toFixed(2)}, ${cube.position.z.toFixed(2)}) | ${cmd.reasoning || ''}`);
 
             if (done) {
               overshootResultEl.textContent = 'Path complete!';
@@ -381,8 +511,8 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
         });
 
         await vision.start();
-        log('Overshoot path-following started');
-        overshootResultEl.textContent = `Following path: ${PATH_WAYPOINTS.length - 1} waypoints`;
+        log('Overshoot real-time navigation started');
+        overshootResultEl.textContent = `Navigating ${PATH_WAYPOINTS.length - 1} waypoints (deviating around obstacles)`;
         window._overshootVision = vision;
       } catch (err) {
         overshootResultEl.textContent = `Failed: ${err.message}`;
@@ -411,7 +541,7 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
             cube.position.x += cmd.dx;
             cube.position.y += cmd.dy;
             cube.position.z += cmd.dz;
-            log(`Moved cube by (${cmd.dx}, ${cmd.dy}, ${cmd.dz}) → (${cube.position.x.toFixed(2)}, ${cube.position.y.toFixed(2)}, ${cube.position.z.toFixed(2)})`);
+            log(`Moved cube by (${cmd.dx}, ${cmd.dy}, ${cmd.dz}) -> (${cube.position.x.toFixed(2)}, ${cube.position.y.toFixed(2)}, ${cube.position.z.toFixed(2)})`);
             break;
 
           case 'updateRotation':
@@ -435,14 +565,13 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
               camera.position.normalize().multiplyScalar(distance);
               camera.lookAt(0, 0, 0);
             }
-            log(`Camera update — view: ${useFirstPerson ? 'FP' : 'orbit'}`);
+            log(`Camera update - view: ${useFirstPerson ? 'FP' : 'orbit'}`);
             break;
 
           default:
             log(`Unknown action: ${cmd.action}`);
         }
 
-        // Render one frame then send screenshot back
         renderer.render(scene, fpCamera);
         requestAnimationFrame(() => {
           const image = screenshot();
@@ -452,7 +581,7 @@ The robot is already moving toward the waypoint. Your job is to check for obstac
       };
 
       ws.onclose = () => {
-        statusEl.textContent = 'Disconnected — reconnecting...';
+        statusEl.textContent = 'Disconnected - reconnecting...';
         statusEl.style.color = '#f00';
         log('WebSocket disconnected, retrying in 2s...');
         setTimeout(connect, 2000);

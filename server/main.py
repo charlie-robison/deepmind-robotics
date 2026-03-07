@@ -10,6 +10,7 @@ import os
 from tool_calls.depth import DepthResult
 from tool_calls.three_js import camera_update, update_position as _update_position, update_rotation as _update_rotation
 from tool_calls.mcp import start_mcp_session
+from tool_calls.path_detection import detect_path_from_image, PathDetectionResult
 from database import init_db
 from models import Environment, Pose, Trajectory, ActivityLog
 from ws_manager import ws_manager
@@ -194,6 +195,25 @@ async def websocket_endpoint(ws: WebSocket):
             ws_manager.receive_response(json.loads(data))
     except WebSocketDisconnect:
         ws_manager.disconnect()
+
+
+## PATH DETECTION (single-image VLM call)
+class DetectPathRequest(BaseModel):
+    image: str  # base64-encoded top-down image (or path served via /static/)
+
+@app.post("/detect-waypoints")
+async def detect_waypoints(request: DetectPathRequest) -> PathDetectionResult:
+    return await detect_path_from_image(request.image)
+
+@app.get("/topdown-image")
+async def get_topdown_image():
+    """Serve the top-down path image as base64 for the client to use."""
+    import base64
+    img_path = Path(__file__).resolve().parent / "topdown_path.png"
+    if not img_path.exists():
+        raise HTTPException(status_code=404, detail="Top-down image not found")
+    b64 = base64.b64encode(img_path.read_bytes()).decode()
+    return {"image": f"data:image/png;base64,{b64}"}
 
 
 ## TOOL CALLS FOR MCP
