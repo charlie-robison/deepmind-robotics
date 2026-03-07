@@ -37,15 +37,64 @@
       overflow: hidden;
     }
     #topdown-label {
-      position: fixed; bottom: 215px; left: 50%; transform: translateX(-50%);
+      position: fixed; bottom: 365px; left: 50%; transform: translateX(-50%);
       z-index: 11; color: #fff; font-family: monospace; font-size: 11px;
       background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px;
     }
+    #round-log {
+      position: fixed; top: 60px; left: 10px; z-index: 10;
+      background: rgba(0,0,0,0.9); color: #fff;
+      font-family: monospace; font-size: 13px;
+      padding: 14px 16px; border-radius: 8px;
+      width: 300px; max-height: calc(100vh - 80px); overflow-y: auto;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    #round-log .rl-title {
+      color: #fff; font-size: 15px; font-weight: bold; margin-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;
+      letter-spacing: 1px;
+    }
+    #round-log .round-entry {
+      margin-bottom: 10px; padding: 8px 10px; border-radius: 5px;
+      background: rgba(255,255,255,0.08); border-left: 4px solid #555;
+    }
+    #round-log .round-entry.object-win { border-left-color: #4488ff; background: rgba(68,136,255,0.08); }
+    #round-log .round-entry.enemy-win { border-left-color: #ff4444; background: rgba(255,68,68,0.08); }
+    #round-log .round-entry .re-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
+    }
+    #round-log .round-entry .re-round { color: #fff; font-weight: bold; font-size: 13px; }
+    #round-log .round-entry .re-winner { font-weight: bold; font-size: 14px; }
+    #round-log .round-entry .re-winner.obj { color: #66aaff; }
+    #round-log .round-entry .re-winner.enm { color: #ff6666; }
+    #round-log .round-entry .re-moves { color: #aaa; font-size: 12px; }
+    #round-log .round-entry .re-detail { color: #ccc; font-size: 11px; margin-top: 4px; }
+    #round-log .round-entry .re-label { color: #888; }
+    #round-log .round-entry .re-narrative { color: #ddd; font-size: 11px; margin-top: 5px; font-style: italic; line-height: 1.4; }
+    #round-log .round-entry .re-sequence { color: #888; font-size: 10px; margin-top: 4px; word-break: break-all; }
+    #round-graph {
+      margin-top: 12px; padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.15);
+    }
+    #round-graph .rg-title {
+      color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+    #round-graph canvas {
+      width: 100%; border-radius: 4px;
+      background: rgba(255,255,255,0.03);
+    }
+    #round-graph .rg-legend {
+      display: flex; gap: 14px; margin-top: 6px; font-size: 10px; color: #888;
+    }
+    #round-graph .rg-legend .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle;
+    }
     #log {
       position: fixed; bottom: 10px; left: 10px; color: #0f0;
-      font-family: monospace; font-size: 11px; z-index: 10;
-      background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px;
-      max-height: 180px; overflow-y: auto; width: 320px;
+      font-family: monospace; font-size: 10px; z-index: 10;
+      background: rgba(0,0,0,0.7); padding: 6px 10px; border-radius: 4px;
+      max-height: 120px; overflow-y: auto; width: 260px;
     }
     #overshoot-panel {
       position: fixed; bottom: 10px; right: 10px; z-index: 10;
@@ -86,14 +135,17 @@
     <div class="agent-score object">
       <div>OBJECT</div>
       <div id="object-wins">Wins: 0</div>
+      <div id="object-elo" style="font-size:11px;color:#88bbff">ELO: 1200</div>
     </div>
     <div>
+      <div class="moves" id="round-number">Round: 1</div>
       <div class="moves" id="move-count">Moves: 0</div>
       <div class="turn-indicator" id="turn-indicator">--</div>
     </div>
     <div class="agent-score enemy">
       <div>ENEMY</div>
       <div id="enemy-wins">Wins: 0</div>
+      <div id="enemy-elo" style="font-size:11px;color:#ff8888">ELO: 1200</div>
     </div>
   </div>
 
@@ -106,6 +158,21 @@
     </div>
   </div>
 
+  <div id="round-log">
+    <div class="rl-title">ROUND HISTORY</div>
+    <div id="round-graph">
+      <div class="rg-title">TRAINING DATA</div>
+      <canvas id="graph-canvas" width="280" height="180"></canvas>
+      <div class="rg-legend">
+        <span><span class="dot" style="background:#4488ff"></span>Object win</span>
+        <span><span class="dot" style="background:#ff4444"></span>Enemy win</span>
+      </div>
+      <div class="rg-legend" style="margin-top:2px">
+        <span style="color:#555">x: round | y: moves | size: ELO</span>
+      </div>
+    </div>
+    <div id="round-log-entries"></div>
+  </div>
   <div id="topdown"></div>
   <div id="topdown-label">Top Down</div>
   <div id="log"></div>
@@ -205,7 +272,7 @@
     const enemyRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     rightView.appendChild(enemyRenderer.domElement);
 
-    const topdownSize = 200;
+    const topdownSize = 350;
     const topdownRenderer = new THREE.WebGLRenderer({ antialias: true });
     topdownRenderer.setSize(topdownSize, topdownSize);
     document.getElementById('topdown').appendChild(topdownRenderer.domElement);
@@ -267,10 +334,10 @@
     ];
     let currentWaypointIdx = 1;
     const WAYPOINT_THRESHOLD = 0.3;
-    const STEP_SIZE = 0.25;
+    const STEP_SIZE = 0.3;
     const ENEMY_STEP_SIZE = 0.3;
     const pathY = 0.05;
-    const COLLISION_RADIUS = 0.5;
+    const COLLISION_RADIUS = 0.35;
 
     let pathLine = null;
     let waypointDots = [];
@@ -314,15 +381,418 @@
     let objectWins = 0;
     let enemyWins = 0;
     let roundOver = false;
+    let roundNumber = 0;
+
+    // ---- ELO RATING SYSTEM ----
+    let objectElo = 1200;
+    let enemyElo = 1200;
+    const K_FACTOR = 32;
+
+    function updateElo(winner) {
+      const expectedObj = 1 / (1 + Math.pow(10, (enemyElo - objectElo) / 400));
+      const expectedEnm = 1 - expectedObj;
+      const objScore = winner === 'object' ? 1 : 0;
+      const enmScore = winner === 'enemy' ? 1 : 0;
+      objectElo = Math.round(objectElo + K_FACTOR * (objScore - expectedObj));
+      enemyElo = Math.round(enemyElo + K_FACTOR * (enmScore - expectedEnm));
+    }
+
+    // Streak tracking
+    let objectStreak = 0; // positive = win streak, negative = loss streak
+    let enemyStreak = 0;
+
+    function updateStreaks(winner) {
+      if (winner === 'object') {
+        objectStreak = objectStreak > 0 ? objectStreak + 1 : 1;
+        enemyStreak = enemyStreak < 0 ? enemyStreak - 1 : -1;
+      } else {
+        enemyStreak = enemyStreak > 0 ? enemyStreak + 1 : 1;
+        objectStreak = objectStreak < 0 ? objectStreak - 1 : -1;
+      }
+    }
+
+    function getAgentMood(elo, streak) {
+      if (streak >= 3) return 'dominant';
+      if (streak >= 1 && elo > 1250) return 'confident';
+      if (streak <= -3) return 'desperate';
+      if (streak <= -1 && elo < 1150) return 'struggling';
+      return 'neutral';
+    }
+
+    function buildEloContext(agent) {
+      const elo = agent === 'object' ? objectElo : enemyElo;
+      const oppElo = agent === 'object' ? enemyElo : objectElo;
+      const streak = agent === 'object' ? objectStreak : enemyStreak;
+      const mood = getAgentMood(elo, streak);
+      const eloDiff = elo - oppElo;
+
+      let ctx = `\n\nPERFORMANCE RATING: Your ELO is ${elo} (opponent: ${oppElo}).`;
+
+      if (streak > 0) ctx += ` You are on a ${streak}-win streak.`;
+      else if (streak < 0) ctx += ` You are on a ${Math.abs(streak)}-loss streak.`;
+
+      if (agent === 'object') {
+        switch (mood) {
+          case 'dominant':
+            ctx += ` You are dominating. Keep your current strategy but stay unpredictable — vary between straight, left, and right so the enemy can't predict you.`;
+            break;
+          case 'confident':
+            ctx += ` You are performing well. Maintain your approach but mix in occasional direction changes to stay unpredictable.`;
+            break;
+          case 'desperate':
+            ctx += ` EMERGENCY: You keep getting caught. COMPLETELY CHANGE your strategy. If you've been dodging, try going straight and sprinting. If you've been going straight, dodge aggressively. The enemy has learned your pattern — you MUST break it NOW.`;
+            break;
+          case 'struggling':
+            ctx += ` You are underperforming. Try a new approach: alternate between going straight for speed and dodging only at the last moment when the enemy is very close (under 1.5 units).`;
+            break;
+          default:
+            ctx += ` Play smart — go straight for speed, dodge only when the enemy is close.`;
+        }
+      } else {
+        switch (mood) {
+          case 'dominant':
+            ctx += ` You are dominating. Keep pressure on but vary your flanking direction so the object can't predict you.`;
+            break;
+          case 'confident':
+            ctx += ` You are performing well. Mix up direct charges with flanking to stay unpredictable.`;
+            break;
+          case 'desperate':
+            ctx += ` EMERGENCY: The object keeps escaping. COMPLETELY CHANGE your strategy. If you've been flanking one way, switch. If you've been going direct, try cutting off the object at its NEXT waypoint instead. Be unpredictable.`;
+            break;
+          case 'struggling':
+            ctx += ` You are underperforming. Try intercepting: instead of chasing the object's current position, aim for where it's GOING (its next waypoint). Cut it off.`;
+            break;
+          default:
+            ctx += ` Balance between direct pursuit and flanking. Aim ahead of the object, not at it.`;
+        }
+      }
+
+      return ctx;
+    }
+
+    // ---- PROMPT-BASED MEMORY ----
+    // Move log for the current round
+    let currentRoundMoves = []; // { turn: 'object'|'enemy', move: string, pos: {x,z}, enemyPos: {x,z}, enemyDist: number }
+
+    // History of past rounds (kept to last 5 for context window)
+    const MAX_HISTORY = 5;
+    let gameHistory = []; // { round, winner, totalMoves, objectMoves: [], enemyMoves: [], summary }
+
+    function recordMove(agent, move) {
+      const oPos = { x: +objectMesh.position.x.toFixed(1), z: +objectMesh.position.z.toFixed(1) };
+      const ePos = { x: +enemyMesh.position.x.toFixed(1), z: +enemyMesh.position.z.toFixed(1) };
+      const dist = +Math.hypot(oPos.x - ePos.x, oPos.z - ePos.z).toFixed(1);
+      currentRoundMoves.push({ turn: agent, move, objectPos: oPos, enemyPos: ePos, enemyDist: dist, wp: currentWaypointIdx });
+    }
+
+    function finishRound(winner) {
+      roundNumber++;
+      updateElo(winner);
+      updateStreaks(winner);
+      const objectMoves = currentRoundMoves.filter(m => m.turn === 'object').map(m => m.move);
+      const enemyMoves = currentRoundMoves.filter(m => m.turn === 'enemy').map(m => m.move);
+
+      // Build a compact summary of what happened
+      const objMoveCounts = {};
+      objectMoves.forEach(m => { objMoveCounts[m] = (objMoveCounts[m] || 0) + 1; });
+      const enmMoveCounts = {};
+      enemyMoves.forEach(m => { enmMoveCounts[m] = (enmMoveCounts[m] || 0) + 1; });
+
+      // Find the critical moment — the last few moves before the round ended
+      const lastMoves = currentRoundMoves.slice(-6);
+      const criticalMoment = lastMoves.map(m =>
+        `${m.turn}:${m.move}(dist=${m.enemyDist},wp=${m.wp})`
+      ).join(' -> ');
+
+      const summary = {
+        round: roundNumber,
+        winner,
+        totalMoves: currentRoundMoves.length,
+        objectMoveCounts: objMoveCounts,
+        enemyMoveCounts: enmMoveCounts,
+        criticalMoment,
+        maxWpReached: Math.max(...currentRoundMoves.map(m => m.wp)),
+      };
+
+      gameHistory.push(summary);
+      if (gameHistory.length > MAX_HISTORY) gameHistory.shift();
+
+      log(`Round ${roundNumber} memory saved (${winner} won in ${summary.totalMoves} moves)`);
+      updateRoundLog(summary);
+      currentRoundMoves = [];
+    }
+
+    const roundLogEntries = document.getElementById('round-log-entries');
+    const graphCanvas = document.getElementById('graph-canvas');
+    const graphCtx = graphCanvas.getContext('2d');
+    const allRoundResults = []; // persistent across MAX_HISTORY limit
+
+    function drawGraph() {
+      const W = graphCanvas.width;
+      const H = graphCanvas.height;
+      const pad = { top: 18, bottom: 24, left: 34, right: 14 };
+      const plotW = W - pad.left - pad.right;
+      const plotH = H - pad.top - pad.bottom;
+
+      graphCtx.clearRect(0, 0, W, H);
+
+      if (allRoundResults.length === 0) {
+        graphCtx.fillStyle = '#555';
+        graphCtx.font = '12px monospace';
+        graphCtx.textAlign = 'center';
+        graphCtx.fillText('Waiting for data...', W / 2, H / 2);
+        return;
+      }
+
+      const maxRound = Math.max(...allRoundResults.map(r => r.round), 1);
+      const minRound = Math.max(1, maxRound - 29); // show last 30 rounds
+      const maxMoves = Math.max(...allRoundResults.map(r => r.totalMoves), 10);
+      const minElo = Math.min(...allRoundResults.map(r => Math.min(r.objectElo, r.enemyElo)), 1100);
+      const maxElo = Math.max(...allRoundResults.map(r => Math.max(r.objectElo, r.enemyElo)), 1300);
+
+      // Grid
+      graphCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+      graphCtx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + (plotH / 4) * i;
+        graphCtx.beginPath();
+        graphCtx.moveTo(pad.left, y);
+        graphCtx.lineTo(W - pad.right, y);
+        graphCtx.stroke();
+      }
+      for (let i = 0; i <= 4; i++) {
+        const x = pad.left + (plotW / 4) * i;
+        graphCtx.beginPath();
+        graphCtx.moveTo(x, pad.top);
+        graphCtx.lineTo(x, pad.top + plotH);
+        graphCtx.stroke();
+      }
+
+      // Axis labels
+      graphCtx.fillStyle = '#555';
+      graphCtx.font = '8px monospace';
+      graphCtx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const val = Math.round(maxMoves * (1 - i / 4));
+        const y = pad.top + (plotH / 4) * i;
+        graphCtx.fillText(val, pad.left - 4, y + 3);
+      }
+      graphCtx.textAlign = 'center';
+      for (let i = 0; i <= 4; i++) {
+        const val = Math.round(minRound + ((maxRound - minRound) / 4) * i);
+        const x = pad.left + (plotW / 4) * i;
+        graphCtx.fillText(val, x, H - pad.bottom + 14);
+      }
+
+      // Axis titles
+      graphCtx.fillStyle = '#444';
+      graphCtx.font = '7px monospace';
+      graphCtx.textAlign = 'center';
+      graphCtx.fillText('round', pad.left + plotW / 2, H - 2);
+      graphCtx.save();
+      graphCtx.translate(8, pad.top + plotH / 2);
+      graphCtx.rotate(-Math.PI / 2);
+      graphCtx.fillText('moves', 0, 0);
+      graphCtx.restore();
+
+      // Trend lines (connect dots of same color)
+      const objResults = allRoundResults.filter(r => r.winner === 'object');
+      const enmResults = allRoundResults.filter(r => r.winner === 'enemy');
+
+      function drawTrend(results, color) {
+        if (results.length < 2) return;
+        graphCtx.strokeStyle = color;
+        graphCtx.lineWidth = 0.5;
+        graphCtx.globalAlpha = 0.25;
+        graphCtx.beginPath();
+        results.forEach((r, i) => {
+          const x = pad.left + ((r.round - minRound) / (maxRound - minRound || 1)) * plotW;
+          const y = pad.top + (1 - r.totalMoves / maxMoves) * plotH;
+          if (i === 0) graphCtx.moveTo(x, y);
+          else graphCtx.lineTo(x, y);
+        });
+        graphCtx.stroke();
+        graphCtx.globalAlpha = 1;
+      }
+      drawTrend(objResults, '#4488ff');
+      drawTrend(enmResults, '#ff4444');
+
+      // Scatter points
+      allRoundResults.forEach(r => {
+        const x = pad.left + ((r.round - minRound) / (maxRound - minRound || 1)) * plotW;
+        const y = pad.top + (1 - r.totalMoves / maxMoves) * plotH;
+
+        // Size based on winner's ELO (higher ELO = bigger dot)
+        const winnerElo = r.winner === 'object' ? r.objectElo : r.enemyElo;
+        const eloNorm = (winnerElo - minElo) / (maxElo - minElo || 1);
+        const radius = 3 + eloNorm * 6;
+
+        const color = r.winner === 'object' ? '#4488ff' : '#ff4444';
+        const glow = r.winner === 'object' ? 'rgba(68,136,255,' : 'rgba(255,68,68,';
+
+        // Glow
+        graphCtx.beginPath();
+        graphCtx.arc(x, y, radius + 3, 0, Math.PI * 2);
+        graphCtx.fillStyle = glow + '0.15)';
+        graphCtx.fill();
+
+        // Dot
+        graphCtx.beginPath();
+        graphCtx.arc(x, y, radius, 0, Math.PI * 2);
+        graphCtx.fillStyle = color;
+        graphCtx.fill();
+
+        // Border
+        graphCtx.beginPath();
+        graphCtx.arc(x, y, radius, 0, Math.PI * 2);
+        graphCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+        graphCtx.lineWidth = 0.5;
+        graphCtx.stroke();
+      });
+
+      // Latest point highlight
+      if (allRoundResults.length > 0) {
+        const latest = allRoundResults[allRoundResults.length - 1];
+        const lx = pad.left + ((latest.round - minRound) / (maxRound - minRound || 1)) * plotW;
+        const ly = pad.top + (1 - latest.totalMoves / maxMoves) * plotH;
+        graphCtx.beginPath();
+        graphCtx.arc(lx, ly, 2, 0, Math.PI * 2);
+        graphCtx.fillStyle = '#fff';
+        graphCtx.fill();
+      }
+    }
+
+    drawGraph();
+
+    function buildNarrative(summary) {
+      const totalWP = PATH_WAYPOINTS.length - 1;
+      const wpProgress = summary.maxWpReached;
+      const pct = Math.round((wpProgress / totalWP) * 100);
+
+      let narrative = '';
+
+      if (summary.winner === 'object') {
+        if (summary.totalMoves < 15) {
+          narrative = `Object sprinted to the goal in just ${summary.totalMoves} moves — enemy never got close.`;
+        } else if (summary.totalMoves < 30) {
+          narrative = `Object navigated the path and reached the goal after a solid ${summary.totalMoves}-move run.`;
+        } else {
+          narrative = `A long battle of ${summary.totalMoves} moves, but Object outlasted the Enemy and reached the goal.`;
+        }
+      } else {
+        if (wpProgress <= 1) {
+          narrative = `Enemy caught Object almost immediately — only made it ${pct}% through the path.`;
+        } else if (pct < 50) {
+          narrative = `Object was intercepted early at WP${wpProgress} (${pct}% of path) after ${summary.totalMoves} moves.`;
+        } else if (pct < 80) {
+          narrative = `Close one! Object got ${pct}% through the path before Enemy closed in at WP${wpProgress}.`;
+        } else {
+          narrative = `Heartbreaker — Object was ${pct}% to the goal at WP${wpProgress} but Enemy caught up in the final stretch.`;
+        }
+      }
+
+      // Add strategy insight
+      const topObjMove = Object.entries(summary.objectMoveCounts).sort((a, b) => b[1] - a[1])[0];
+      const topEnmMove = Object.entries(summary.enemyMoveCounts).sort((a, b) => b[1] - a[1])[0];
+      if (topObjMove && topEnmMove) {
+        narrative += ` Object favored "${topObjMove[0]}", Enemy relied on "${topEnmMove[0]}".`;
+      }
+
+      return narrative;
+    }
+
+    function updateRoundLog(summary) {
+      const entry = document.createElement('div');
+      entry.className = `round-entry ${summary.winner === 'object' ? 'object-win' : 'enemy-win'}`;
+
+      const winnerLabel = summary.winner === 'object' ? 'OBJECT' : 'ENEMY';
+      const winnerClass = summary.winner === 'object' ? 'obj' : 'enm';
+
+      const objMoves = Object.entries(summary.objectMoveCounts).map(([k, v]) => `${k}x${v}`).join(', ');
+      const enmMoves = Object.entries(summary.enemyMoveCounts).map(([k, v]) => `${k}x${v}`).join(', ');
+      const totalWP = PATH_WAYPOINTS.length - 1;
+
+      entry.innerHTML = `
+        <div class="re-header">
+          <span class="re-round">ROUND ${summary.round}</span>
+          <span class="re-winner ${winnerClass}">${winnerLabel} WINS</span>
+        </div>
+        <div class="re-moves">${summary.totalMoves} moves | WP ${summary.maxWpReached}/${totalWP} | ELO: <span style="color:#88bbff">${objectElo}</span> vs <span style="color:#ff8888">${enemyElo}</span></div>
+        <div class="re-narrative">${buildNarrative(summary)}</div>
+        <div class="re-detail"><span class="re-label">Object:</span> ${objMoves}</div>
+        <div class="re-detail"><span class="re-label">Enemy:</span> ${enmMoves}</div>
+      `;
+
+      roundLogEntries.insertBefore(entry, roundLogEntries.firstChild);
+
+      allRoundResults.push({ round: summary.round, winner: summary.winner, totalMoves: summary.totalMoves, objectElo, enemyElo, maxWp: summary.maxWpReached });
+      drawGraph();
+    }
+
+    function buildHistoryContext(agent) {
+      if (gameHistory.length === 0) return '';
+
+      let ctx = `\n\nGAME HISTORY (learn from past rounds):\n`;
+      for (const h of gameHistory) {
+        ctx += `Round ${h.round}: ${h.winner} won in ${h.totalMoves} moves. `;
+        ctx += `Object reached WP ${h.maxWpReached}. `;
+        ctx += `Object used: ${Object.entries(h.objectMoveCounts).map(([k,v]) => `${k}:${v}`).join(', ')}. `;
+        ctx += `Enemy used: ${Object.entries(h.enemyMoveCounts).map(([k,v]) => `${k}:${v}`).join(', ')}. `;
+        ctx += `Final sequence: ${h.criticalMoment}\n`;
+      }
+
+      const wins = gameHistory.filter(h => h.winner === agent).length;
+      const losses = gameHistory.length - wins;
+
+      if (agent === 'object') {
+        ctx += `\nYou (object) have won ${wins} and lost ${losses} of the last ${gameHistory.length} rounds.`;
+        if (losses > wins) {
+          ctx += ` You are losing — try different dodge patterns. If you always go straight, try dodging more. If you always dodge one direction, try the other.`;
+        }
+        // Look at what the enemy does most
+        const allEnemyMoves = {};
+        gameHistory.forEach(h => {
+          Object.entries(h.enemyMoveCounts).forEach(([k, v]) => { allEnemyMoves[k] = (allEnemyMoves[k] || 0) + v; });
+        });
+        const topEnemyMove = Object.entries(allEnemyMoves).sort((a, b) => b[1] - a[1])[0];
+        if (topEnemyMove) {
+          ctx += ` The enemy tends to use "${topEnemyMove[0]}" most often — dodge accordingly.`;
+        }
+      } else {
+        ctx += `\nYou (enemy) have won ${wins} and lost ${losses} of the last ${gameHistory.length} rounds.`;
+        if (losses > wins) {
+          ctx += ` You are losing — the object keeps escaping. Try flanking toward its next waypoint instead of going direct. Predict where it will be.`;
+        }
+        const allObjMoves = {};
+        gameHistory.forEach(h => {
+          Object.entries(h.objectMoveCounts).forEach(([k, v]) => { allObjMoves[k] = (allObjMoves[k] || 0) + v; });
+        });
+        const topObjMove = Object.entries(allObjMoves).sort((a, b) => b[1] - a[1])[0];
+        if (topObjMove) {
+          ctx += ` The object tends to use "${topObjMove[0]}" most often — anticipate that.`;
+        }
+      }
+
+      return ctx;
+    }
+
+    const roundNumberEl = document.getElementById('round-number');
+
+    const objectEloEl = document.getElementById('object-elo');
+    const enemyEloEl = document.getElementById('enemy-elo');
 
     function updateScoreboard() {
+      roundNumberEl.textContent = `Round: ${roundNumber + 1}`;
       moveCountEl.textContent = `Moves: ${totalMoves}`;
       objectWinsEl.textContent = `Wins: ${objectWins}`;
       enemyWinsEl.textContent = `Wins: ${enemyWins}`;
+      objectEloEl.textContent = `ELO: ${objectElo}`;
+      enemyEloEl.textContent = `ELO: ${enemyElo}`;
     }
 
     function showWin(winner) {
       roundOver = true;
+      finishRound(winner);
       const banner = document.getElementById('win-banner');
       if (winner === 'object') {
         objectWins++;
@@ -401,7 +871,7 @@
         const len = dist2 || 1;
         const perpX = -dz2 / len;
         const perpZ = dx2 / len;
-        const dodgeMag = STEP_SIZE * 0.6;
+        const dodgeMag = STEP_SIZE * 0.4;
         if (dodgeDir === 'left') {
           moveDx += perpX * dodgeMag;
           moveDz += perpZ * dodgeMag;
@@ -490,12 +960,37 @@
     // =========================================================================
     // VLM PROMPTS
     // =========================================================================
+    function recentMovesContext(agent) {
+      const moves = currentRoundMoves.filter(m => m.turn === agent);
+      if (moves.length === 0) return '';
+      const last8 = moves.slice(-8);
+      const moveList = last8.map(m => `${m.move}(dist=${m.enemyDist})`).join(', ');
+      return `\n\nYOUR MOVES THIS ROUND (${moves.length} so far): ${moveList}`;
+    }
+
     function objectPrompt() {
       const pos = objectMesh.position;
       const wp = PATH_WAYPOINTS[currentWaypointIdx];
       const ex = enemyMesh.position;
-      const enemyDist = Math.hypot(pos.x - ex.x, pos.z - ex.z).toFixed(1);
-      return `You control a BLUE robot navigating a path. Current position: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). Next waypoint: (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}). A RED enemy cube is ${enemyDist} units away trying to catch you. Look at the image. Should you go "straight" toward the waypoint, dodge "left", or dodge "right" to avoid the enemy? Answer with just one word: straight, left, or right.`;
+      const enemyDist = +Math.hypot(pos.x - ex.x, pos.z - ex.z).toFixed(1);
+      let urgency;
+      if (enemyDist <= 1.0) urgency = 'DANGER — enemy is right on you! Dodge NOW!';
+      else if (enemyDist <= 2.5) urgency = 'CAUTION — enemy is closing in. Consider dodging.';
+      else urgency = 'Safe distance. Go straight for speed.';
+
+      let prompt = `You control a BLUE robot navigating a path. Position: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). Next waypoint: (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}). RED enemy is ${enemyDist} units away. ${urgency}
+
+STRATEGY:
+- Go "straight" for maximum speed toward the waypoint.
+- Dodge "left" or "right" to evade the enemy when it's close.
+- Don't repeat the same dodge direction too many times — be unpredictable!
+- Balance speed (straight) and survival (dodging).
+
+Answer with ONE word: straight, left, or right.`;
+      prompt += recentMovesContext('object');
+      prompt += buildHistoryContext('object');
+      prompt += buildEloContext('object');
+      return prompt;
     }
 
     function enemyPrompt() {
@@ -503,7 +998,18 @@
       const target = objectMesh.position;
       const dist = Math.hypot(pos.x - target.x, pos.z - target.z).toFixed(1);
       const wp = PATH_WAYPOINTS[Math.min(currentWaypointIdx + 1, PATH_WAYPOINTS.length - 1)];
-      return `You control a RED enemy trying to catch a BLUE robot. You are at (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). The blue robot is ${dist} units away at (${target.x.toFixed(1)}, ${target.z.toFixed(1)}). It is heading toward (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}). Look at the image. Should you go "direct" straight at it, "flank-left" to cut it off, or "flank-right"? Answer with one: direct, flank-left, or flank-right.`;
+      let prompt = `You control a RED enemy trying to catch a BLUE robot. You are at (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). The blue robot is ${dist} units away at (${target.x.toFixed(1)}, ${target.z.toFixed(1)}). It is heading toward (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}).
+
+STRATEGY:
+- "direct" charges straight at the robot — good when close.
+- "flank-left" or "flank-right" cuts it off — good when far, aim for where it's GOING.
+- Don't always pick the same direction — be unpredictable!
+
+Answer with one: direct, flank-left, or flank-right.`;
+      prompt += recentMovesContext('enemy');
+      prompt += buildHistoryContext('enemy');
+      prompt += buildEloContext('enemy');
+      return prompt;
     }
 
     // =========================================================================
@@ -667,6 +1173,7 @@
             objectVlmResult = null;
             const dodgeDir = move === 'straight' ? null : move;
             const result = objectStep(dodgeDir);
+            recordMove('object', move);
             totalMoves++;
             updateScoreboard();
             log(`Object: ${move} (WP ${currentWaypointIdx})`);
@@ -701,6 +1208,7 @@
             const move = enemyVlmResult || 'direct';
             enemyVlmResult = null;
             enemyStep(move);
+            recordMove('enemy', move);
             totalMoves++;
             updateScoreboard();
             log(`Enemy: ${move}`);
