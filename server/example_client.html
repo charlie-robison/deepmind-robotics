@@ -2,65 +2,75 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Three.js WebSocket Example</title>
+  <title>Agent vs Agent Training</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
-    #status {
-      position: fixed; top: 10px; left: 10px; color: #fff;
-      font-family: monospace; font-size: 14px; z-index: 10;
-      background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px;
+    #split-container {
+      display: flex; width: 100vw; height: 100vh;
     }
-    #log {
-      position: fixed; bottom: 10px; left: 10px; color: #0f0;
-      font-family: monospace; font-size: 12px; z-index: 10;
-      background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px;
-      max-height: 200px; overflow-y: auto; width: 400px;
+    #left-view, #right-view {
+      flex: 1; position: relative; border-right: 2px solid #333;
     }
+    #right-view { border-right: none; }
+    .view-label {
+      position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+      color: #fff; font-family: monospace; font-size: 14px; z-index: 10;
+      background: rgba(0,0,0,0.7); padding: 4px 12px; border-radius: 4px;
+    }
+    #left-view .view-label { color: #4488ff; }
+    #right-view .view-label { color: #ff4444; }
+    #scoreboard {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 20; background: rgba(0,0,0,0.85); color: #fff;
+      font-family: monospace; font-size: 14px; padding: 10px 20px;
+      border-radius: 6px; border: 1px solid rgba(255,255,255,0.2);
+      display: flex; gap: 24px; align-items: center;
+    }
+    #scoreboard .agent-score { text-align: center; }
+    #scoreboard .agent-score.object { color: #4488ff; }
+    #scoreboard .agent-score.enemy { color: #ff4444; }
+    #scoreboard .moves { color: #aaa; }
+    #scoreboard .turn-indicator { color: #0f0; font-size: 12px; }
     #topdown {
-      position: fixed; top: 10px; right: 10px; z-index: 10;
-      border: 2px solid rgba(255,255,255,0.3); border-radius: 6px;
+      position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 10; border: 2px solid rgba(255,255,255,0.3); border-radius: 6px;
       overflow: hidden;
     }
     #topdown-label {
-      position: fixed; top: 14px; right: 60px; z-index: 11;
-      color: #fff; font-family: monospace; font-size: 11px;
+      position: fixed; bottom: 215px; left: 50%; transform: translateX(-50%);
+      z-index: 11; color: #fff; font-family: monospace; font-size: 11px;
       background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px;
-      pointer-events: none;
+    }
+    #log {
+      position: fixed; bottom: 10px; left: 10px; color: #0f0;
+      font-family: monospace; font-size: 11px; z-index: 10;
+      background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px;
+      max-height: 180px; overflow-y: auto; width: 320px;
     }
     #overshoot-panel {
       position: fixed; bottom: 10px; right: 10px; z-index: 10;
-      background: rgba(0,0,0,0.8); color: #0ff; padding: 12px 16px;
-      font-family: monospace; font-size: 12px; border-radius: 6px;
-      max-width: 400px; max-height: 200px; overflow-y: auto;
+      background: rgba(0,0,0,0.8); color: #0ff; padding: 10px 14px;
+      font-family: monospace; font-size: 11px; border-radius: 6px;
+      max-width: 320px; max-height: 180px; overflow-y: auto;
       border: 1px solid rgba(0,255,255,0.3);
     }
-    #overshoot-panel .label {
-      color: #fff; font-size: 11px; margin-bottom: 6px; opacity: 0.7;
-    }
-    #obstacle-flash {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      z-index: 100; font-family: monospace; font-size: 80px; font-weight: bold;
-      color: #ff0000; text-shadow: 0 0 30px #ff0000, 0 0 60px #ff4444;
-      pointer-events: none; opacity: 0; transition: opacity 0.1s;
-    }
-    #obstacle-flash.visible {
-      opacity: 1;
-      animation: flash-pulse 0.5s ease-out;
-    }
+    #overshoot-panel .label { color: #fff; font-size: 11px; margin-bottom: 4px; opacity: 0.7; }
     #collide-flash {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      z-index: 100; font-family: monospace; font-size: 100px; font-weight: bold;
+      z-index: 100; font-family: monospace; font-size: 80px; font-weight: bold;
       color: #ff00ff; text-shadow: 0 0 40px #ff00ff, 0 0 80px #9900ff;
       pointer-events: none; opacity: 0; transition: opacity 0.1s;
     }
     #collide-flash.visible {
-      opacity: 1;
-      animation: collide-pulse 0.8s ease-out;
+      opacity: 1; animation: collide-pulse 0.8s ease-out;
     }
-    @keyframes flash-pulse {
-      0% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
-      100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    #win-banner {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 200; font-family: monospace; font-size: 48px; font-weight: bold;
+      pointer-events: none; opacity: 0; transition: opacity 0.3s;
+      text-shadow: 0 0 30px currentColor;
     }
+    #win-banner.visible { opacity: 1; }
     @keyframes collide-pulse {
       0% { opacity: 1; transform: translate(-50%, -50%) scale(1.5); }
       50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
@@ -69,14 +79,38 @@
   </style>
 </head>
 <body>
-  <div id="obstacle-flash">OBSTACLE!</div>
-  <div id="collide-flash">COLLIDED!</div>
-  <div id="status">Connecting...</div>
-  <div id="log"></div>
+  <div id="collide-flash">CAUGHT!</div>
+  <div id="win-banner"></div>
+
+  <div id="scoreboard">
+    <div class="agent-score object">
+      <div>OBJECT</div>
+      <div id="object-wins">Wins: 0</div>
+    </div>
+    <div>
+      <div class="moves" id="move-count">Moves: 0</div>
+      <div class="turn-indicator" id="turn-indicator">--</div>
+    </div>
+    <div class="agent-score enemy">
+      <div>ENEMY</div>
+      <div id="enemy-wins">Wins: 0</div>
+    </div>
+  </div>
+
+  <div id="split-container">
+    <div id="left-view">
+      <div class="view-label">Object (Blue)</div>
+    </div>
+    <div id="right-view">
+      <div class="view-label">Enemy (Red)</div>
+    </div>
+  </div>
+
   <div id="topdown"></div>
   <div id="topdown-label">Top Down</div>
+  <div id="log"></div>
   <div id="overshoot-panel">
-    <div class="label">Overshoot Vision</div>
+    <div class="label">Agent Vision</div>
     <div id="overshoot-result">Initializing...</div>
   </div>
 
@@ -94,12 +128,15 @@
 
   <script type="module">
     import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { RealtimeVision } from 'overshoot';
 
-    const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
+    const overshootResultEl = document.getElementById('overshoot-result');
+    const turnIndicatorEl = document.getElementById('turn-indicator');
+    const moveCountEl = document.getElementById('move-count');
+    const objectWinsEl = document.getElementById('object-wins');
+    const enemyWinsEl = document.getElementById('enemy-wins');
 
     function log(msg) {
       const line = document.createElement('div');
@@ -108,112 +145,133 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // Scene setup
+    // =========================================================================
+    // SCENE
+    // =========================================================================
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a2e);
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(3, 3, 3);
-    camera.lookAt(0, 0, 0);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-
-    // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1);
     dirLight.position.set(5, 10, 7);
     scene.add(dirLight);
 
-    // Load cozy living room GLB as environment
     const gltfLoader = new GLTFLoader();
     gltfLoader.load('/static/cozy_living_room_baked.glb', (gltf) => {
       scene.add(gltf.scene);
-      log('Loaded cozy living room environment');
-    }, undefined, (err) => {
-      log(`Error loading GLB: ${err.message}`);
-    });
+      log('Loaded environment');
+    }, undefined, (err) => log(`GLB error: ${err.message}`));
 
-    // Object to move
-    const geometry = new THREE.BoxGeometry(0.2, 0.8, 0.2);
-    const material = new THREE.MeshStandardMaterial({ color: 0x4488ff });
-    const cube = new THREE.Mesh(geometry, material);
-    cube.position.set(-3, 0.4, 4); // left side, further back
-    scene.add(cube);
+    // =========================================================================
+    // OBJECT (blue cube agent)
+    // =========================================================================
+    const objectGeo = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+    const objectMat = new THREE.MeshStandardMaterial({ color: 0x4488ff });
+    const objectMesh = new THREE.Mesh(objectGeo, objectMat);
+    objectMesh.position.set(-3, 0.4, 4);
+    scene.add(objectMesh);
 
-    // First-person camera attached to the cube
-    const fpCamera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.01, 1000);
-    cube.add(fpCamera);
-    fpCamera.position.set(0, 0.4, 0); // on top of the cube's head
-    fpCamera.rotation.set(0, 0, 0);
+    // First-person camera for object
+    const objectCam = new THREE.PerspectiveCamera(90, 1, 0.01, 1000);
+    objectMesh.add(objectCam);
+    objectCam.position.set(0, 0.4, 0);
 
-    let useFirstPerson = true;
+    // =========================================================================
+    // ENEMY (red cube agent)
+    // =========================================================================
+    const enemyGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+    const enemyMat = new THREE.MeshStandardMaterial({ color: 0xff4444, emissive: 0x881111, emissiveIntensity: 0.5 });
+    const enemyMesh = new THREE.Mesh(enemyGeo, enemyMat);
+    enemyMesh.position.set(0, 0.6, 0);
+    scene.add(enemyMesh);
 
-    // Top-down mini-map
-    const topdownSize = 500;
-    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    const enemyLight = new THREE.PointLight(0xff4444, 1.5, 3);
+    enemyMesh.add(enemyLight);
+
+    // First-person camera for enemy
+    const enemyCam = new THREE.PerspectiveCamera(90, 1, 0.01, 1000);
+    enemyMesh.add(enemyCam);
+    enemyCam.position.set(0, 0.2, 0);
+
+    // =========================================================================
+    // RENDERERS: left (object), right (enemy), top-down
+    // =========================================================================
+    const leftView = document.getElementById('left-view');
+    const rightView = document.getElementById('right-view');
+
+    const objectRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    leftView.appendChild(objectRenderer.domElement);
+
+    const enemyRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    rightView.appendChild(enemyRenderer.domElement);
+
+    const topdownSize = 200;
+    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true });
     topdownRenderer.setSize(topdownSize, topdownSize);
     document.getElementById('topdown').appendChild(topdownRenderer.domElement);
 
-    const topdownCamera = new THREE.OrthographicCamera(-4, 4, 4, -4, 0.1, 100);
+    const topdownCamera = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.1, 100);
     topdownCamera.position.set(0, 20, 0);
     topdownCamera.lookAt(0, 0, 0);
 
-    // Animation loop
+    function resizeRenderers() {
+      const w = Math.floor(window.innerWidth / 2);
+      const h = window.innerHeight;
+      objectRenderer.setSize(w, h);
+      objectCam.aspect = w / h;
+      objectCam.updateProjectionMatrix();
+      enemyRenderer.setSize(w, h);
+      enemyCam.aspect = w / h;
+      enemyCam.updateProjectionMatrix();
+    }
+    resizeRenderers();
+    window.addEventListener('resize', resizeRenderers);
+
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
+    function faceToward(mesh, targetX, targetZ) {
+      const dx = targetX - mesh.position.x;
+      const dz = targetZ - mesh.position.z;
+      mesh.rotation.y = Math.atan2(dx, dz) + Math.PI;
+    }
+
+    // =========================================================================
+    // ANIMATION
+    // =========================================================================
     function animate() {
       requestAnimationFrame(animate);
-      controls.update();
-      if (window._dronesReady) updateDrones();
-      const activeCamera = useFirstPerson ? fpCamera : camera;
-      renderer.render(scene, activeCamera);
+      // Enemy hover bob + always face the object
+      enemyMesh.position.y = 0.6 + Math.sin(Date.now() * 0.003) * 0.15;
+      faceToward(enemyMesh, objectMesh.position.x, objectMesh.position.z);
+
+      // Object always faces the enemy
+      faceToward(objectMesh, enemyMesh.position.x, enemyMesh.position.z);
+
+      objectRenderer.render(scene, objectCam);
+      enemyRenderer.render(scene, enemyCam);
       topdownRenderer.render(scene, topdownCamera);
     }
     animate();
 
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      fpCamera.aspect = window.innerWidth / window.innerHeight;
-      fpCamera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'v' || e.key === 'V') {
-        useFirstPerson = !useFirstPerson;
-        controls.enabled = !useFirstPerson;
-        log(`Camera: ${useFirstPerson ? 'First Person' : 'Orbit'}`);
-      }
-    });
-
-    function screenshot() {
-      renderer.render(scene, fpCamera);
-      return renderer.domElement.toDataURL('image/png');
-    }
-
     // =========================================================================
-    // PATH DEFINITION & VISUALIZATION
+    // PATH
     // =========================================================================
-    const overshootResultEl = document.getElementById('overshoot-result');
-
-    // Default path waypoints (will be replaced by VLM-planned safe path)
     let PATH_WAYPOINTS = [
-      { x: -3,   z:  4   },  // start (cube spawn)
-      { x:  3,   z:  4   },  // right along bottom
-      { x:  3,   z: -1   },  // up the right side
-      { x:  0.5, z: -1   },  // left across middle
-      { x:  0.5, z: -3   },  // up to top area
-      { x: -2,   z: -3   },  // left to top-left
+      { x: -3, z: 4 },
+      { x: 3, z: 4 },
+      { x: 3, z: -1 },
+      { x: 0.5, z: -1 },
+      { x: 0.5, z: -3 },
+      { x: -2, z: -3 },
     ];
     let currentWaypointIdx = 1;
     const WAYPOINT_THRESHOLD = 0.3;
     const STEP_SIZE = 0.25;
+    const ENEMY_STEP_SIZE = 0.3;
     const pathY = 0.05;
+    const COLLISION_RADIUS = 0.5;
 
-    // Path visualization objects (recreated when path changes)
     let pathLine = null;
     let waypointDots = [];
 
@@ -238,666 +296,461 @@
     }
     drawPath();
 
-    // Physical obstacles — tall red pillars placed along the path after detection
-    let pillarMeshes = [];
-    let pillarPositions = []; // {x, z} for proximity checks
-    const PILLAR_DETECT_RADIUS = 1.5; // distance to start avoiding
-    const DODGE_AMOUNT = 0.6; // lateral dodge distance
-
-    function createPillar(x, z) {
-      const geo = new THREE.BoxGeometry(0.4, 3, 0.4);
-      const mat = new THREE.MeshStandardMaterial({ color: 0xff4444 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(x, 1.5, z);
-      scene.add(mesh);
-      pillarMeshes.push(mesh);
-      pillarPositions.push({ x, z });
-      return mesh;
-    }
-
-    function spawnPillarsAlongPath() {
-      pillarMeshes.forEach(m => scene.remove(m));
-      pillarMeshes = [];
-      pillarPositions = [];
-
-      for (let i = 0; i < PATH_WAYPOINTS.length - 1; i++) {
-        const a = PATH_WAYPOINTS[i];
-        const b = PATH_WAYPOINTS[i + 1];
-        const mx = (a.x + b.x) / 2;
-        const mz = (a.z + b.z) / 2;
-        createPillar(mx, mz);
-      }
-      log(`Spawned ${pillarMeshes.length} pillars along path`);
-    }
-
-    // Check if a drone is ahead of the robot on the path (not behind)
-    function isDroneAhead(drone) {
-      const wp = PATH_WAYPOINTS[currentWaypointIdx];
-      if (!wp) return false;
-      const travelDx = wp.x - cube.position.x;
-      const travelDz = wp.z - cube.position.z;
-      const toDroneDx = drone.mesh.position.x - cube.position.x;
-      const toDroneDz = drone.mesh.position.z - cube.position.z;
-      return (travelDx * toDroneDx + travelDz * toDroneDz) > 0;
-    }
-
-    const COLLISION_RADIUS = 0.5;
-
-    // Find the nearest obstacle (pillar or active drone ahead) within detection radius
-    function nearestObstacle(px, pz) {
-      let closest = null;
-      let minDist = Infinity;
-      let type = null;
-
-      // Check pillars
-      for (const p of pillarPositions) {
-        const d = Math.hypot(px - p.x, pz - p.z);
-        if (d < minDist) { minDist = d; closest = p; type = 'pillar'; }
-      }
-
-      // Check drones — only active ones that are ahead
-      if (window._dronesReady) {
-        for (const drone of drones) {
-          if (!drone.active) continue;
-          if (!isDroneAhead(drone)) continue;
-          const ed = Math.hypot(px - drone.mesh.position.x, pz - drone.mesh.position.z);
-          if (ed < minDist) { minDist = ed; closest = { x: drone.mesh.position.x, z: drone.mesh.position.z }; type = 'enemy'; }
-        }
-      }
-
-      return minDist < PILLAR_DETECT_RADIUS ? { obstacle: closest, dist: minDist, type } : null;
-    }
-
-    // Compute lateral dodge perpendicular to travel direction
-    function computeDodge(obstacle, travelDx, travelDz, dir) {
-      const len = Math.hypot(travelDx, travelDz) || 1;
-      // Left perpendicular
-      const perpLx = -travelDz / len;
-      const perpLz = travelDx / len;
-
-      if (dir === 'left') {
-        return { dx: perpLx * DODGE_AMOUNT, dz: perpLz * DODGE_AMOUNT };
-      } else {
-        return { dx: -perpLx * DODGE_AMOUNT, dz: -perpLz * DODGE_AMOUNT };
-      }
-    }
-
-    // Geometric fallback: compute dodge direction from positions
-    function geometricDodgeDir(obstacle, travelDx, travelDz) {
-      const len = Math.hypot(travelDx, travelDz) || 1;
-      const perpLx = -travelDz / len;
-      const perpLz = travelDx / len;
-      const toObsX = obstacle.x - cube.position.x;
-      const toObsZ = obstacle.z - cube.position.z;
-      const dot = toObsX * perpLx + toObsZ * perpLz;
-      return dot > 0 ? 'right' : 'left'; // dodge away from obstacle
-    }
-
-    // =========================================================================
-    // DRONES: 3 flying cubes that patrol zones and block the robot
-    // =========================================================================
-    const DRONE_SPEED = 0.012;
-    const DRONE_HOVER_Y = 1.2;
-    const DRONE_PATROL_RADIUS = 1.2;   // each drone's active zone
-    const WAYPOINT_NO_FLY_RADIUS = 1.0;
-    const DRONE_COLORS = [0x9900ff, 0xff6600, 0x00ccff];
-    const DRONE_EMISSIVE = [0x4400aa, 0x883300, 0x006688];
-
-    // Drone home positions — spread along the path
-    const DRONE_HOMES = [
-      { x: 0, z: 2 },    // early path
-      { x: 2, z: 0 },    // mid path
-      { x: -1, z: -2 },  // late path
-    ];
-
-    const drones = [];
-
-    for (let i = 0; i < 3; i++) {
-      const geo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-      const mat = new THREE.MeshStandardMaterial({ color: DRONE_COLORS[i], emissive: DRONE_EMISSIVE[i], emissiveIntensity: 0.5 });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(DRONE_HOMES[i].x, DRONE_HOVER_Y, DRONE_HOMES[i].z);
-      scene.add(mesh);
-
-      const light = new THREE.PointLight(DRONE_COLORS[i], 1.5, 3);
-      mesh.add(light);
-
-      // Patrol radius ring on the ground
-      const ringGeo = new THREE.RingGeometry(DRONE_PATROL_RADIUS - 0.02, DRONE_PATROL_RADIUS + 0.02, 64);
-      const ringMat = new THREE.MeshBasicMaterial({ color: DRONE_COLORS[i], transparent: true, opacity: 0.2, side: THREE.DoubleSide });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(DRONE_HOMES[i].x, 0.01, DRONE_HOMES[i].z);
-      scene.add(ring);
-
-      drones.push({
-        mesh,
-        home: DRONE_HOMES[i],
-        active: false,   // only active when robot is in patrol radius
-        bobOffset: i * 2, // stagger the bobbing
-      });
-    }
-    window._dronesReady = true;
-
-    function updateDrones() {
-      for (const drone of drones) {
-        const robotDist = Math.hypot(cube.position.x - drone.home.x, cube.position.z - drone.home.z);
-        drone.active = robotDist < DRONE_PATROL_RADIUS;
-
-        if (drone.active) {
-          // Intercept: move between robot and its current waypoint
-          const wp = PATH_WAYPOINTS[currentWaypointIdx] || PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
-          const targetX = (cube.position.x + wp.x) / 2;
-          const targetZ = (cube.position.z + wp.z) / 2;
-
-          const dx = targetX - drone.mesh.position.x;
-          const dz = targetZ - drone.mesh.position.z;
-          const dist = Math.hypot(dx, dz);
-
-          if (dist > 0.1) {
-            let newX = drone.mesh.position.x + (dx / dist) * DRONE_SPEED;
-            let newZ = drone.mesh.position.z + (dz / dist) * DRONE_SPEED;
-
-            // Stay within patrol radius
-            const homeDist = Math.hypot(newX - drone.home.x, newZ - drone.home.z);
-            if (homeDist > DRONE_PATROL_RADIUS) {
-              const hd = Math.hypot(newX - drone.home.x, newZ - drone.home.z) || 0.01;
-              newX = drone.home.x + ((newX - drone.home.x) / hd) * DRONE_PATROL_RADIUS;
-              newZ = drone.home.z + ((newZ - drone.home.z) / hd) * DRONE_PATROL_RADIUS;
-            }
-
-            // Enforce no-fly zone around waypoints
-            for (const w of PATH_WAYPOINTS) {
-              const wd = Math.hypot(newX - w.x, newZ - w.z);
-              if (wd < WAYPOINT_NO_FLY_RADIUS) {
-                const pushDx = newX - w.x;
-                const pushDz = newZ - w.z;
-                const pushDist = Math.hypot(pushDx, pushDz) || 0.01;
-                newX = w.x + (pushDx / pushDist) * WAYPOINT_NO_FLY_RADIUS;
-                newZ = w.z + (pushDz / pushDist) * WAYPOINT_NO_FLY_RADIUS;
-              }
-            }
-
-            drone.mesh.position.x = newX;
-            drone.mesh.position.z = newZ;
-          }
-        } else {
-          // Return to home position when inactive
-          const dx = drone.home.x - drone.mesh.position.x;
-          const dz = drone.home.z - drone.mesh.position.z;
-          const dist = Math.hypot(dx, dz);
-          if (dist > 0.1) {
-            drone.mesh.position.x += (dx / dist) * DRONE_SPEED;
-            drone.mesh.position.z += (dz / dist) * DRONE_SPEED;
-          }
-        }
-
-        // Hover bob + spin
-        drone.mesh.position.y = DRONE_HOVER_Y + Math.sin(Date.now() * 0.003 + drone.bobOffset) * 0.3;
-        drone.mesh.rotation.y += 0.03;
-        drone.mesh.rotation.x += 0.01;
-
-        // Collision check
-        const collDist = Math.hypot(cube.position.x - drone.mesh.position.x, cube.position.z - drone.mesh.position.z);
-        if (collDist < COLLISION_RADIUS) {
-          const flashEl = document.getElementById('collide-flash');
-          if (!flashEl.classList.contains('visible')) {
-            flashEl.classList.remove('visible');
-            void flashEl.offsetWidth;
-            flashEl.classList.add('visible');
-            setTimeout(() => flashEl.classList.remove('visible'), 800);
-            log('COLLIDED with drone!');
-          }
-        }
-      }
-    }
-
-    // Trail: track where the cube has actually been
-    const trailPoints = [cube.position.clone()];
+    // Trail
+    const trailPoints = [objectMesh.position.clone()];
     const trailGeom = new THREE.BufferGeometry().setFromPoints(trailPoints);
-    const trailLine = new THREE.Line(trailGeom, new THREE.LineBasicMaterial({ color: 0xff4444 }));
+    const trailLine = new THREE.Line(trailGeom, new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 }));
     scene.add(trailLine);
 
-    function updateTrail() {
-      trailPoints.push(new THREE.Vector3(cube.position.x, pathY, cube.position.z));
+    const enemyTrailPoints = [enemyMesh.position.clone()];
+    const enemyTrailGeom = new THREE.BufferGeometry().setFromPoints(enemyTrailPoints);
+    const enemyTrailLine = new THREE.Line(enemyTrailGeom, new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.5 }));
+    scene.add(enemyTrailLine);
+
+    // =========================================================================
+    // GAME STATE
+    // =========================================================================
+    let totalMoves = 0;
+    let objectWins = 0;
+    let enemyWins = 0;
+    let roundOver = false;
+
+    function updateScoreboard() {
+      moveCountEl.textContent = `Moves: ${totalMoves}`;
+      objectWinsEl.textContent = `Wins: ${objectWins}`;
+      enemyWinsEl.textContent = `Wins: ${enemyWins}`;
+    }
+
+    function showWin(winner) {
+      roundOver = true;
+      const banner = document.getElementById('win-banner');
+      if (winner === 'object') {
+        objectWins++;
+        banner.style.color = '#4488ff';
+        banner.textContent = 'OBJECT WINS!';
+        log('Object reached the goal!');
+      } else {
+        enemyWins++;
+        banner.style.color = '#ff4444';
+        banner.textContent = 'ENEMY WINS!';
+        log('Enemy caught the object!');
+
+        const flashEl = document.getElementById('collide-flash');
+        flashEl.classList.remove('visible');
+        void flashEl.offsetWidth;
+        flashEl.classList.add('visible');
+        setTimeout(() => flashEl.classList.remove('visible'), 800);
+      }
+      banner.classList.add('visible');
+      updateScoreboard();
+
+      // Auto-reset after 3s
+      setTimeout(() => {
+        banner.classList.remove('visible');
+        resetRound();
+      }, 3000);
+    }
+
+    function resetRound() {
+      objectMesh.position.set(-3, 0.4, 4);
+      enemyMesh.position.set(0, 0.6, 0);
+      currentWaypointIdx = 1;
+      totalMoves = 0;
+      roundOver = false;
+      trailPoints.length = 0;
+      trailPoints.push(objectMesh.position.clone());
       trailGeom.setFromPoints(trailPoints);
+      enemyTrailPoints.length = 0;
+      enemyTrailPoints.push(enemyMesh.position.clone());
+      enemyTrailGeom.setFromPoints(enemyTrailPoints);
+      updateScoreboard();
+      log('--- New round ---');
     }
 
-    // Rotate cube so the FP camera faces the current waypoint (direction of travel)
-    function faceGoal() {
+    // =========================================================================
+    // MOVEMENT HELPERS
+    // =========================================================================
+
+    // Object: step toward current waypoint, optionally dodging left/right
+    function objectStep(dodgeDir) {
       const wp = PATH_WAYPOINTS[currentWaypointIdx];
-      const dx = wp.x - cube.position.x;
-      const dz = wp.z - cube.position.z;
-      const targetYaw = Math.atan2(dx, dz) + Math.PI;
-      let diff = targetYaw - cube.rotation.y;
-      while (diff > Math.PI) diff -= 2 * Math.PI;
-      while (diff < -Math.PI) diff += 2 * Math.PI;
-      cube.rotation.y += diff;
-      return diff;
-    }
-
-    // =========================================================================
-    // PHASE 1: DETECT WAYPOINTS FROM IMAGE VIA SERVER (Gemini Vision)
-    // =========================================================================
-
-    // Pass a base64 image to Gemini for waypoint + obstacle detection.
-    // If no image is provided, fetches the default top-down image from the server.
-    async function detectWaypoints(base64Image = null) {
-      log('Phase 1: Loading top-down image for waypoint detection...');
-      overshootResultEl.textContent = 'Detecting waypoints from top-down image...';
-
-      // If no image provided, fetch the default one from the server
-      if (!base64Image) {
-        log('Fetching top-down path image from server...');
-        const imgResp = await fetch('/topdown-image');
-        if (!imgResp.ok) throw new Error(`Failed to fetch top-down image (${imgResp.status})`);
-        const imgData = await imgResp.json();
-        base64Image = imgData.image;
-      }
-
-      log('Sending image to Gemini for waypoint detection...');
-      const resp = await fetch('/detect-waypoints', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64Image }),
-      });
-
-      if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(`Detection failed (${resp.status}): ${errText}`);
-      }
-
-      const data = await resp.json();
-      log(`Detected ${data.waypoints?.length || 0} waypoints, ${data.obstacles?.length || 0} obstacles`);
-      if (data.reasoning) log(`Reasoning: ${data.reasoning}`);
-      return data;
-    }
-
-    // =========================================================================
-    // OBSTACLE VISUALIZATION (from VLM detection)
-    // =========================================================================
-    let obstacleBoxes = [];
-
-    function visualizeObstacles(obstacles) {
-      obstacleBoxes.forEach(b => scene.remove(b));
-      obstacleBoxes = [];
-
-      obstacles.forEach(obs => {
-        const w = obs.width || 1;
-        const d = obs.depth || 1;
-        // Light transparent fill
-        const geo = new THREE.PlaneGeometry(w, d);
-        const mat = new THREE.MeshBasicMaterial({
-          color: 0xff0000, transparent: true, opacity: 0.15, side: THREE.DoubleSide,
-        });
-        const plane = new THREE.Mesh(geo, mat);
-        plane.rotation.x = -Math.PI / 2;
-        plane.position.set(obs.center_x, 0.02, obs.center_z);
-        scene.add(plane);
-        obstacleBoxes.push(plane);
-
-        // Dashed outline rectangle on the ground
-        const halfW = w / 2, halfD = d / 2;
-        const pts = [
-          new THREE.Vector3(-halfW, 0, -halfD),
-          new THREE.Vector3( halfW, 0, -halfD),
-          new THREE.Vector3( halfW, 0,  halfD),
-          new THREE.Vector3(-halfW, 0,  halfD),
-          new THREE.Vector3(-halfW, 0, -halfD),
-        ];
-        const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
-        lineGeo.computeBoundingSphere();
-        const dashMat = new THREE.LineDashedMaterial({
-          color: 0xff4444, dashSize: 0.15, gapSize: 0.1, linewidth: 1,
-        });
-        const dashLine = new THREE.Line(lineGeo, dashMat);
-        dashLine.computeLineDistances();
-        dashLine.position.set(obs.center_x, 0.03, obs.center_z);
-        scene.add(dashLine);
-        obstacleBoxes.push(dashLine);
-      });
-    }
-
-    // =========================================================================
-    // NAVIGATION FUNCTIONS
-    // =========================================================================
-
-    function buildNavPrompt() {
-      const pos = cube.position;
-      const wp = PATH_WAYPOINTS[currentWaypointIdx];
-      const dx = wp.x - pos.x;
-      const dz = wp.z - pos.z;
-      const dist = Math.hypot(dx, dz);
-      const heading = (cube.rotation.y * 180 / Math.PI) % 360;
-      return `Robot navigating a room. Position: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). Target: (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}).
-Look for RED PILLARS (static obstacles) and a PURPLE GLOWING CUBE (flying enemy). If you see any obstacle or enemy, output dodge:"left" or dodge:"right" to avoid it.`;
-    }
-
-    // Step forward toward waypoint with optional lateral dodge direction
-    function stepTowardWaypoint(dodgeDir = null) {
-      const wp = PATH_WAYPOINTS[currentWaypointIdx];
-      const dx = wp.x - cube.position.x;
-      const dz = wp.z - cube.position.z;
+      const dx = wp.x - objectMesh.position.x;
+      const dz = wp.z - objectMesh.position.z;
       const dist = Math.hypot(dx, dz);
 
       if (dist < WAYPOINT_THRESHOLD) {
         if (currentWaypointIdx < PATH_WAYPOINTS.length - 1) {
           currentWaypointIdx++;
-          log(`Reached waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`);
-          return true; // stepped
+          log(`Reached WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`);
+        } else {
+          return 'goal';
         }
-        return 'done';
       }
 
-      // Forward component: always move toward waypoint
-      const step = Math.min(STEP_SIZE, dist);
-      let moveDx = (dx / dist) * step;
-      let moveDz = (dz / dist) * step;
+      const wp2 = PATH_WAYPOINTS[currentWaypointIdx];
+      const dx2 = wp2.x - objectMesh.position.x;
+      const dz2 = wp2.z - objectMesh.position.z;
+      const dist2 = Math.hypot(dx2, dz2);
+      const step = Math.min(STEP_SIZE, dist2);
 
-      // Apply lateral dodge if VLM said left/right
+      let moveDx = (dx2 / dist2) * step;
+      let moveDz = (dz2 / dist2) * step;
+
+      // Lateral dodge
       if (dodgeDir) {
-        const nearby = nearestObstacle(cube.position.x, cube.position.z);
-        if (nearby) {
-          const dodge = computeDodge(nearby.obstacle, dx, dz, dodgeDir);
-          const strength = 1 - (nearby.dist / PILLAR_DETECT_RADIUS);
-          moveDx += dodge.dx * strength;
-          moveDz += dodge.dz * strength;
+        const len = dist2 || 1;
+        const perpX = -dz2 / len;
+        const perpZ = dx2 / len;
+        const dodgeMag = STEP_SIZE * 0.6;
+        if (dodgeDir === 'left') {
+          moveDx += perpX * dodgeMag;
+          moveDz += perpZ * dodgeMag;
+        } else {
+          moveDx -= perpX * dodgeMag;
+          moveDz -= perpZ * dodgeMag;
         }
       }
 
-      // Clamp total movement to step size
+      // Clamp
       const mag = Math.hypot(moveDx, moveDz);
       if (mag > STEP_SIZE) {
         moveDx = (moveDx / mag) * STEP_SIZE;
         moveDz = (moveDz / mag) * STEP_SIZE;
       }
 
-      const rotDy = faceGoal();
+      objectMesh.position.x += moveDx;
+      objectMesh.position.z += moveDz;
 
-      cube.position.x += moveDx;
-      cube.position.z += moveDz;
-      updateTrail();
+      trailPoints.push(new THREE.Vector3(objectMesh.position.x, pathY, objectMesh.position.z));
+      trailGeom.setFromPoints(trailPoints);
 
-      fetch('/updatePosition', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dx: moveDx, dy: 0, dz: moveDz }),
-      }).catch(() => {});
-
-      if (Math.abs(rotDy) > 0.01) {
-        fetch('/updateRotation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dx: 0, dy: rotDy, dz: 0 }),
-        }).catch(() => {});
-      }
-
-      return true; // stepped
+      return 'moved';
     }
 
-    // Flag to prevent WS echo from double-applying nav moves
-    let navActive = false;
+    // Enemy: step toward a target position
+    function enemyStep(moveDir) {
+      const tx = objectMesh.position.x;
+      const tz = objectMesh.position.z;
+      const dx = tx - enemyMesh.position.x;
+      const dz = tz - enemyMesh.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.01) return;
+
+      let moveDx = (dx / dist) * ENEMY_STEP_SIZE;
+      let moveDz = (dz / dist) * ENEMY_STEP_SIZE;
+
+      // VLM can suggest flanking direction
+      if (moveDir === 'flank-left' || moveDir === 'flank-right') {
+        const len = dist || 1;
+        const perpX = -dz / len;
+        const perpZ = dx / len;
+        const flankMag = ENEMY_STEP_SIZE * 0.5;
+        if (moveDir === 'flank-left') {
+          moveDx += perpX * flankMag;
+          moveDz += perpZ * flankMag;
+        } else {
+          moveDx -= perpX * flankMag;
+          moveDz -= perpZ * flankMag;
+        }
+        const mag = Math.hypot(moveDx, moveDz);
+        if (mag > ENEMY_STEP_SIZE) {
+          moveDx = (moveDx / mag) * ENEMY_STEP_SIZE;
+          moveDz = (moveDz / mag) * ENEMY_STEP_SIZE;
+        }
+      }
+
+      enemyMesh.position.x += moveDx;
+      enemyMesh.position.z += moveDz;
+
+      enemyTrailPoints.push(new THREE.Vector3(enemyMesh.position.x, pathY, enemyMesh.position.z));
+      enemyTrailGeom.setFromPoints(enemyTrailPoints);
+    }
+
+    function checkCollision() {
+      const d = Math.hypot(
+        objectMesh.position.x - enemyMesh.position.x,
+        objectMesh.position.z - enemyMesh.position.z
+      );
+      return d < COLLISION_RADIUS;
+    }
 
     // =========================================================================
-    // MAIN INIT: PHASE 1 (ANALYZE) -> PHASE 2 (NAVIGATE)
+    // SCREENSHOTS for VLM
     // =========================================================================
-    async function initOvershoot() {
+    function objectScreenshot() {
+      objectRenderer.render(scene, objectCam);
+      return objectRenderer.domElement.toDataURL('image/png');
+    }
+
+    function enemyScreenshot() {
+      enemyRenderer.render(scene, enemyCam);
+      return enemyRenderer.domElement.toDataURL('image/png');
+    }
+
+    // =========================================================================
+    // VLM PROMPTS
+    // =========================================================================
+    function objectPrompt() {
+      const pos = objectMesh.position;
+      const wp = PATH_WAYPOINTS[currentWaypointIdx];
+      const ex = enemyMesh.position;
+      const enemyDist = Math.hypot(pos.x - ex.x, pos.z - ex.z).toFixed(1);
+      return `You control a BLUE robot navigating a path. Current position: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). Next waypoint: (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}). A RED enemy cube is ${enemyDist} units away trying to catch you. Look at the image. Should you go "straight" toward the waypoint, dodge "left", or dodge "right" to avoid the enemy? Answer with just one word: straight, left, or right.`;
+    }
+
+    function enemyPrompt() {
+      const pos = enemyMesh.position;
+      const target = objectMesh.position;
+      const dist = Math.hypot(pos.x - target.x, pos.z - target.z).toFixed(1);
+      const wp = PATH_WAYPOINTS[Math.min(currentWaypointIdx + 1, PATH_WAYPOINTS.length - 1)];
+      return `You control a RED enemy trying to catch a BLUE robot. You are at (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). The blue robot is ${dist} units away at (${target.x.toFixed(1)}, ${target.z.toFixed(1)}). It is heading toward (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}). Look at the image. Should you go "direct" straight at it, "flank-left" to cut it off, or "flank-right"? Answer with one: direct, flank-left, or flank-right.`;
+    }
+
+    // =========================================================================
+    // PHASE 1: DETECT PATH (Gemini)
+    // =========================================================================
+    async function detectWaypoints() {
+      log('Phase 1: Detecting waypoints...');
+      overshootResultEl.textContent = 'Detecting waypoints...';
+
+      const imgResp = await fetch('/topdown-image');
+      if (!imgResp.ok) throw new Error(`Failed to fetch top-down image (${imgResp.status})`);
+      const imgData = await imgResp.json();
+
+      const resp = await fetch('/detect-waypoints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imgData.image }),
+      });
+
+      if (!resp.ok) throw new Error(`Detection failed (${resp.status})`);
+      const data = await resp.json();
+      log(`Detected ${data.waypoints?.length || 0} waypoints`);
+      return data;
+    }
+
+    // =========================================================================
+    // MAIN: PHASE 1 -> PHASE 2 (turn-based VLM agent loop)
+    // =========================================================================
+    async function init() {
       try {
         const keyResp = await fetch('/overshoot-key');
         const { key } = await keyResp.json();
         if (!key) {
           overshootResultEl.textContent = 'No API key configured';
-          log('Set OVERSHOOT_API env var on the server');
           return;
         }
 
-        // ---- PHASE 1: Detect waypoints from top-down image (Gemini) ----
-        overshootResultEl.textContent = 'Detecting waypoints from top-down image...';
-        let detectionResult = null;
+        // Phase 1: Detect waypoints
         try {
-          detectionResult = await detectWaypoints();
+          const detection = await detectWaypoints();
+          if (detection?.waypoints?.length >= 2) {
+            PATH_WAYPOINTS = detection.waypoints.map(wp => ({ x: wp.x, z: wp.z }));
+            currentWaypointIdx = 1;
+            drawPath();
+            log(`Loaded ${PATH_WAYPOINTS.length} waypoints from VLM`);
+          }
         } catch (err) {
-          overshootResultEl.textContent = `Waypoint detection failed: ${err.message}`;
-          log(`Waypoint detection failed: ${err.message}`);
-          return;
+          log(`Waypoint detection failed, using defaults: ${err.message}`);
         }
 
-        if (!detectionResult || !detectionResult.waypoints || detectionResult.waypoints.length < 2) {
-          overshootResultEl.textContent = 'Error: VLM returned insufficient waypoints';
-          log('VLM detection returned insufficient waypoints');
-          return;
-        }
+        await new Promise(r => setTimeout(r, 1000));
 
-        // Use the VLM-detected waypoints as the deterministic path
-        PATH_WAYPOINTS = detectionResult.waypoints.map(wp => ({ x: wp.x, z: wp.z }));
-        log(`Loaded ${PATH_WAYPOINTS.length} waypoints from VLM detection`);
+        // Phase 2: Turn-based agent loop
+        log('Phase 2: Starting turn-based agent battle');
 
-        // Log each detected waypoint
-        PATH_WAYPOINTS.forEach((wp, i) => {
-          const desc = detectionResult.waypoints[i].description || '';
-          log(`  WP${i}: (${wp.x.toFixed(2)}, ${wp.z.toFixed(2)}) ${desc}`);
-        });
+        // Intercept getUserMedia to provide canvas streams
+        const objectStream = objectRenderer.domElement.captureStream(10);
+        const enemyStream = enemyRenderer.domElement.captureStream(10);
+        let activeStream = objectStream;
 
-        // Visualize detected obstacles if any
-        if (detectionResult.obstacles && detectionResult.obstacles.length > 0) {
-          visualizeObstacles(detectionResult.obstacles);
-          log(`Visualized ${detectionResult.obstacles.length} obstacles to avoid`);
-        }
-
-        // Reset navigation state and redraw path
-        currentWaypointIdx = 1;
-        drawPath();
-        spawnPillarsAlongPath();
-        log(`Final path: ${PATH_WAYPOINTS.map(w => `(${w.x.toFixed(1)},${w.z.toFixed(1)})`).join(' -> ')}`);
-
-        // Small delay so the user can see the planned path before navigation starts
-        await new Promise(r => setTimeout(r, 2000));
-
-        // ---- PHASE 2: Option B — proximity triggers, VLM decides direction ----
-        navActive = true;
-        log('Phase 2: Starting navigation (proximity + VLM dodge)...');
-
-        const canvasStream = renderer.domElement.captureStream(10);
-        const origGUM2 = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        const origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
-          if (constraints && constraints.video) return canvasStream;
-          return origGUM2(constraints);
+          if (constraints?.video) return activeStream;
+          return origGUM(constraints);
         };
 
-        let waitingForVlm = false;
-        let vlmDodgeDir = null; // 'left' or 'right' from VLM
-        let navDone = false;
+        // Object's VLM
+        let objectVlmResult = null;
+        let objectWaiting = false;
 
-        const vision = new RealtimeVision({
+        const objectVision = new RealtimeVision({
           apiKey: key,
           model: 'Qwen/Qwen3.5-9B',
-          prompt: buildNavPrompt(),
+          prompt: objectPrompt(),
           source: { type: 'camera', cameraFacing: 'environment' },
           outputSchema: {
             type: 'object',
             properties: {
-              dodge: { type: 'string', description: 'Which way to dodge: "left" or "right"' },
+              move: { type: 'string', description: '"straight", "left", or "right"' },
             },
-            required: ['dodge'],
+            required: ['move'],
           },
           onResult: (result) => {
-            if (!waitingForVlm) return;
-            let dir = null;
+            if (!objectWaiting) return;
+            let move = 'straight';
             if (result.ok) {
-              const raw = (result.result || '').trim();
-              const match = raw.match(/"dodge"\s*:\s*"(left|right)"/i);
-              if (match) dir = match[1].toLowerCase();
-              log(`VLM says dodge: ${dir || 'unclear'}`);
+              const raw = (result.result || '').toLowerCase();
+              if (raw.includes('left')) move = 'left';
+              else if (raw.includes('right')) move = 'right';
             }
-
-            if (!dir) {
-              // VLM didn't give a clear answer — use geometric fallback
-              const nearby = nearestObstacle(cube.position.x, cube.position.z);
-              if (nearby) {
-                const wp = PATH_WAYPOINTS[currentWaypointIdx];
-                dir = geometricDodgeDir(nearby.obstacle, wp.x - cube.position.x, wp.z - cube.position.z);
-                log(`VLM unclear, geometric fallback: ${dir}`);
-              } else {
-                dir = 'left';
-              }
-            }
-
-            vlmDodgeDir = dir;
-            waitingForVlm = false;
+            objectVlmResult = move;
+            objectWaiting = false;
           },
-          onError: (error) => {
-            log(`VLM error: ${error.message}`);
-            // Fallback on error
-            const nearby = nearestObstacle(cube.position.x, cube.position.z);
-            if (nearby) {
-              const wp = PATH_WAYPOINTS[currentWaypointIdx];
-              vlmDodgeDir = geometricDodgeDir(nearby.obstacle, wp.x - cube.position.x, wp.z - cube.position.z);
-            }
-            waitingForVlm = false;
-          },
+          onError: () => { objectVlmResult = 'straight'; objectWaiting = false; },
         });
 
-        await vision.start();
-        log('VLM started for dodge decisions');
-        window._overshootVision = vision;
+        // Enemy's VLM
+        let enemyVlmResult = null;
+        let enemyWaiting = false;
 
-        // Navigation loop
-        const NAV_INTERVAL = 300;
-        const navTimer = setInterval(() => {
-          if (navDone) return;
+        // We need a second stream for enemy - switch active stream before starting
+        const enemyVision = new RealtimeVision({
+          apiKey: key,
+          model: 'Qwen/Qwen3.5-9B',
+          prompt: enemyPrompt(),
+          source: { type: 'camera', cameraFacing: 'environment' },
+          outputSchema: {
+            type: 'object',
+            properties: {
+              move: { type: 'string', description: '"direct", "flank-left", or "flank-right"' },
+            },
+            required: ['move'],
+          },
+          onResult: (result) => {
+            if (!enemyWaiting) return;
+            let move = 'direct';
+            if (result.ok) {
+              const raw = (result.result || '').toLowerCase();
+              if (raw.includes('flank-left') || raw.includes('flank left')) move = 'flank-left';
+              else if (raw.includes('flank-right') || raw.includes('flank right')) move = 'flank-right';
+            }
+            enemyVlmResult = move;
+            enemyWaiting = false;
+          },
+          onError: () => { enemyVlmResult = 'direct'; enemyWaiting = false; },
+        });
 
-          // Check proximity
-          const nearby = nearestObstacle(cube.position.x, cube.position.z);
+        // Start object VLM first
+        activeStream = objectStream;
+        await objectVision.start();
+        log('Object VLM started');
 
-          if (nearby && !waitingForVlm && !vlmDodgeDir) {
-            // Obstacle detected! Pause and ask VLM which way to dodge
-            waitingForVlm = true;
-            const obstLabel = nearby.type === 'enemy' ? 'ENEMY' : 'PILLAR';
-            log(`${obstLabel} detected at dist=${nearby.dist.toFixed(2)}, asking VLM...`);
-            overshootResultEl.textContent = `${obstLabel} nearby! Asking VLM which way to dodge...`;
+        // Start enemy VLM
+        activeStream = enemyStream;
+        await enemyVision.start();
+        log('Enemy VLM started');
 
-            // Flash warning
-            const flashEl = document.getElementById('obstacle-flash');
-            flashEl.classList.remove('visible');
-            void flashEl.offsetWidth;
-            flashEl.classList.add('visible');
-            setTimeout(() => flashEl.classList.remove('visible'), 500);
+        // Turn-based loop
+        let turn = 'object'; // 'object' or 'enemy'
 
-            // Update prompt with obstacle context
-            const wp = PATH_WAYPOINTS[currentWaypointIdx];
-            vision.updatePrompt(`You see an obstacle ahead. Should the robot dodge LEFT or RIGHT to avoid it? The robot is heading toward (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}). Answer with just "left" or "right".`);
-            return; // wait for VLM response
+        const TURN_INTERVAL = 400;
+
+        const gameLoop = setInterval(() => {
+          if (roundOver) return;
+
+          if (turn === 'object') {
+            // Object's turn
+            if (!objectWaiting && objectVlmResult === null) {
+              // Request VLM decision
+              objectWaiting = true;
+              turnIndicatorEl.textContent = "Object's turn (thinking...)";
+              objectVision.updatePrompt(objectPrompt());
+              overshootResultEl.textContent = `Object thinking...`;
+              return;
+            }
+
+            if (objectWaiting) return; // still waiting
+
+            // Apply object's move
+            const move = objectVlmResult || 'straight';
+            objectVlmResult = null;
+            const dodgeDir = move === 'straight' ? null : move;
+            const result = objectStep(dodgeDir);
+            totalMoves++;
+            updateScoreboard();
+            log(`Object: ${move} (WP ${currentWaypointIdx})`);
+            overshootResultEl.textContent = `Object moved: ${move}`;
+            turnIndicatorEl.textContent = "Object moved";
+
+            if (result === 'goal') {
+              showWin('object');
+              return;
+            }
+
+            if (checkCollision()) {
+              showWin('enemy');
+              return;
+            }
+
+            turn = 'enemy';
+
+          } else {
+            // Enemy's turn
+            if (!enemyWaiting && enemyVlmResult === null) {
+              enemyWaiting = true;
+              turnIndicatorEl.textContent = "Enemy's turn (thinking...)";
+              enemyVision.updatePrompt(enemyPrompt());
+              overshootResultEl.textContent = `Enemy thinking...`;
+              return;
+            }
+
+            if (enemyWaiting) return;
+
+            // Apply enemy's move
+            const move = enemyVlmResult || 'direct';
+            enemyVlmResult = null;
+            enemyStep(move);
+            totalMoves++;
+            updateScoreboard();
+            log(`Enemy: ${move}`);
+            overshootResultEl.textContent = `Enemy moved: ${move}`;
+            turnIndicatorEl.textContent = "Enemy moved";
+
+            if (checkCollision()) {
+              showWin('enemy');
+              return;
+            }
+
+            turn = 'object';
           }
+        }, TURN_INTERVAL);
 
-          if (waitingForVlm) {
-            overshootResultEl.textContent = 'Waiting for VLM dodge direction...';
-            return; // still waiting
-          }
-
-          // Move: with dodge if VLM provided direction, otherwise straight
-          const result = stepTowardWaypoint(vlmDodgeDir);
-          vlmDodgeDir = null; // reset after applying
-
-          if (result === 'done') {
-            navDone = true;
-            clearInterval(navTimer);
-            overshootResultEl.textContent = 'Path complete!';
-            log('Path following complete!');
-            vision.stop();
-            return;
-          }
-
-          const wp = PATH_WAYPOINTS[currentWaypointIdx];
-          const dist = Math.hypot(cube.position.x - wp.x, cube.position.z - wp.z);
-          const wpLabel = `WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`;
-          overshootResultEl.textContent = `${wpLabel} | dist:${dist.toFixed(2)} | clear`;
-
-          vision.updatePrompt(buildNavPrompt());
-        }, NAV_INTERVAL);
       } catch (err) {
         overshootResultEl.textContent = `Failed: ${err.message}`;
-        log(`Overshoot init failed: ${err.message}`);
+        log(`Init failed: ${err.message}`);
       }
     }
 
-    initOvershoot();
+    init();
 
-    // WebSocket connection
+    // WebSocket connection (for external control / screenshots)
     function connect() {
       const ws = new WebSocket('ws://localhost:8000/ws');
 
-      ws.onopen = () => {
-        statusEl.textContent = 'Connected to server';
-        statusEl.style.color = '#0f0';
-        log('WebSocket connected');
-      };
+      ws.onopen = () => log('WebSocket connected');
 
       ws.onmessage = (event) => {
         const cmd = JSON.parse(event.data);
-
-        // Skip position/rotation echoes when nav is driving movement
-        if (navActive && (cmd.action === 'updatePosition' || cmd.action === 'updateRotation')) {
-          return;
+        if (cmd.action === 'updatePosition') {
+          objectMesh.position.x += cmd.dx;
+          objectMesh.position.y += cmd.dy;
+          objectMesh.position.z += cmd.dz;
+        } else if (cmd.action === 'updateRotation') {
+          objectMesh.rotation.x += cmd.dx;
+          objectMesh.rotation.y += cmd.dy;
+          objectMesh.rotation.z += cmd.dz;
         }
 
-        log(`Received: ${JSON.stringify(cmd)}`);
-
-        switch (cmd.action) {
-          case 'updatePosition':
-            cube.position.x += cmd.dx;
-            cube.position.y += cmd.dy;
-            cube.position.z += cmd.dz;
-            log(`Moved cube by (${cmd.dx}, ${cmd.dy}, ${cmd.dz}) -> (${cube.position.x.toFixed(2)}, ${cube.position.y.toFixed(2)}, ${cube.position.z.toFixed(2)})`);
-            break;
-
-          case 'updateRotation':
-            cube.rotation.x += cmd.dx;
-            cube.rotation.y += cmd.dy;
-            cube.rotation.z += cmd.dz;
-            log(`Rotated cube by (${cmd.dx.toFixed(2)}, ${cmd.dy.toFixed(2)}, ${cmd.dz.toFixed(2)})`);
-            break;
-
-          case 'cameraUpdate':
-            if (cmd.view === 'firstperson') {
-              useFirstPerson = true;
-              controls.enabled = false;
-            } else if (cmd.view === 'orbit') {
-              useFirstPerson = false;
-              controls.enabled = true;
-            }
-            if (cmd.zoomPercentage !== undefined) {
-              const zoom = cmd.zoomPercentage / 100;
-              const distance = 3 + (1 - zoom) * 10;
-              camera.position.normalize().multiplyScalar(distance);
-              camera.lookAt(0, 0, 0);
-            }
-            log(`Camera update - view: ${useFirstPerson ? 'FP' : 'orbit'}`);
-            break;
-
-          default:
-            log(`Unknown action: ${cmd.action}`);
-        }
-
-        renderer.render(scene, fpCamera);
         requestAnimationFrame(() => {
-          const image = screenshot();
+          const image = objectScreenshot();
           ws.send(JSON.stringify({ image }));
-          log('Sent screenshot back');
         });
       };
 
-      ws.onclose = () => {
-        statusEl.textContent = 'Disconnected - reconnecting...';
-        statusEl.style.color = '#f00';
-        log('WebSocket disconnected, retrying in 2s...');
-        setTimeout(connect, 2000);
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
+      ws.onclose = () => setTimeout(connect, 2000);
+      ws.onerror = () => ws.close();
     }
-
     connect();
   </script>
 </body>
