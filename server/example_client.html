@@ -117,9 +117,8 @@
     const fpCamera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.01, 1000);
     cube.add(fpCamera);
     fpCamera.position.set(0, 0.4, 0); // on top of the cube's head
-    fpCamera.lookAt(new THREE.Vector3(0, 0.4, -1)); // look forward (-Z)
-    // Store the local forward direction
-    const fpForward = new THREE.Vector3(0, 0, -1);
+    // fpCamera faces local -Z by default (no lookAt needed, it inherits cube rotation)
+    fpCamera.rotation.set(0, 0, 0);
 
     let useFirstPerson = true; // default to first-person view
 
@@ -168,12 +167,138 @@
       return renderer.domElement.toDataURL('image/png');
     }
 
-    // --- Overshoot: stream the Three.js canvas to a VLM ---
+    // --- Path definition & visualization ---
     const overshootResultEl = document.getElementById('overshoot-result');
+
+    // Full path including start position (x, z in world coords)
+    const PATH_WAYPOINTS = [
+      { x: -3,   z:  4   },  // start (cube spawn)
+      { x:  3,   z:  4   },  // right along bottom
+      { x:  3,   z: -1   },  // up the right side
+      { x:  0.5, z: -1   },  // left across middle
+      { x:  0.5, z: -3   },  // up to top area
+      { x: -2,   z: -3   },  // left to top-left
+    ];
+    let currentWaypointIdx = 1; // start heading toward index 1
+    const WAYPOINT_THRESHOLD = 0.3;
+    const STEP_SIZE = 0.25;
+
+    // Draw path lines in the scene (visible from top-down)
+    const pathY = 0.05; // just above the floor
+    const pathPoints = PATH_WAYPOINTS.map(wp => new THREE.Vector3(wp.x, pathY, wp.z));
+    const pathGeom = new THREE.BufferGeometry().setFromPoints(pathPoints);
+    const pathLine = new THREE.Line(pathGeom, new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 }));
+    scene.add(pathLine);
+
+    // Draw dots at each waypoint
+    PATH_WAYPOINTS.forEach((wp, i) => {
+      const dotGeo = new THREE.SphereGeometry(0.08, 8, 8);
+      const dotMat = new THREE.MeshBasicMaterial({ color: i === 0 ? 0x0088ff : 0x00ff00 });
+      const dot = new THREE.Mesh(dotGeo, dotMat);
+      dot.position.set(wp.x, pathY + 0.05, wp.z);
+      scene.add(dot);
+    });
+
+    // Trail: track where the cube has actually been
+    const trailPoints = [cube.position.clone()];
+    const trailGeom = new THREE.BufferGeometry().setFromPoints(trailPoints);
+    const trailLine = new THREE.Line(trailGeom, new THREE.LineBasicMaterial({ color: 0xff4444 }));
+    scene.add(trailLine);
+
+    function updateTrail() {
+      trailPoints.push(new THREE.Vector3(cube.position.x, pathY, cube.position.z));
+      trailGeom.setFromPoints(trailPoints);
+    }
+
+    // Rotate cube so the FP camera (local -Z) faces the final goal
+    const GOAL = PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
+    function faceGoal() {
+      const dx = GOAL.x - cube.position.x;
+      const dz = GOAL.z - cube.position.z;
+      // atan2(x, z) gives angle from +Z; camera faces -Z, so add PI
+      const targetYaw = Math.atan2(dx, dz) + Math.PI;
+      let diff = targetYaw - cube.rotation.y;
+      // Normalize to [-PI, PI]
+      while (diff > Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      cube.rotation.y += diff; // snap to target (no smoothing needed)
+      return diff;
+    }
+
+    function buildNavPrompt() {
+      const pos = cube.position;
+      const wp = PATH_WAYPOINTS[currentWaypointIdx];
+      const dx = wp.x - pos.x;
+      const dz = wp.z - pos.z;
+      const dist = Math.hypot(dx, dz);
+      return `You are an obstacle-avoidance system for a robot navigating a 3D room. You see the robot's first-person view.
+
+Current position: x=${pos.x.toFixed(2)}, z=${pos.z.toFixed(2)}
+Target waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}: x=${wp.x}, z=${wp.z} (distance: ${dist.toFixed(2)})
+Heading: ${(cube.rotation.y * 180 / Math.PI).toFixed(0)} degrees
+
+The robot is already moving toward the waypoint. Your job is to check for obstacles.
+- If the path ahead is CLEAR, output adjust_dx=0 and adjust_dz=0.
+- If you see furniture, walls, or objects blocking the path, output a small lateral adjustment (max 0.15 per axis) to steer around it.
+- "reasoning": describe what you see ahead (clear floor, furniture edge, wall, etc.)`;
+    }
+
+    // Move one step toward the current waypoint, returns true if path is complete
+    function stepTowardWaypoint(adjustDx = 0, adjustDz = 0) {
+      const wp = PATH_WAYPOINTS[currentWaypointIdx];
+      const dx = wp.x - cube.position.x;
+      const dz = wp.z - cube.position.z;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist < WAYPOINT_THRESHOLD) {
+        if (currentWaypointIdx < PATH_WAYPOINTS.length - 1) {
+          currentWaypointIdx++;
+          log(`Reached waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`);
+          return false;
+        }
+        return true; // done
+      }
+
+      // Normalize direction and scale to step size
+      const step = Math.min(STEP_SIZE, dist);
+      let moveDx = (dx / dist) * step + adjustDx;
+      let moveDz = (dz / dist) * step + adjustDz;
+
+      // Clamp total movement
+      const mag = Math.hypot(moveDx, moveDz);
+      if (mag > STEP_SIZE) {
+        moveDx = (moveDx / mag) * STEP_SIZE;
+        moveDz = (moveDz / mag) * STEP_SIZE;
+      }
+
+      // Rotate to face the final goal
+      const rotDy = faceGoal();
+
+      // Move
+      cube.position.x += moveDx;
+      cube.position.z += moveDz;
+      updateTrail();
+
+      // Log to server (fire and forget)
+      fetch('/updatePosition', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dx: moveDx, dy: 0, dz: moveDz }),
+      }).catch(() => {});
+
+      if (Math.abs(rotDy) > 0.01) {
+        fetch('/updateRotation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dx: 0, dy: rotDy, dz: 0 }),
+        }).catch(() => {});
+      }
+
+      return false;
+    }
 
     async function initOvershoot() {
       try {
-        // Fetch the API key from the server
         const keyResp = await fetch('/overshoot-key');
         const { key } = await keyResp.json();
         if (!key) {
@@ -183,25 +308,71 @@
         }
 
         // Capture the main renderer canvas as a MediaStream
-        const canvasStream = renderer.domElement.captureStream(10); // 10 fps
+        const canvasStream = renderer.domElement.captureStream(10);
 
-        // Override getUserMedia so the SDK's 'camera' source picks up our canvas stream
         const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
-          if (constraints && constraints.video) {
-            return canvasStream;
-          }
+          if (constraints && constraints.video) return canvasStream;
           return originalGetUserMedia(constraints);
         };
 
         const vision = new RealtimeVision({
           apiKey: key,
-          model: 'google/gemini-2.0-flash-001',
-          prompt: 'Describe what you see in this 3D scene. Identify objects, their positions, and any notable details.',
+          model: 'Qwen/Qwen3.5-9B',
+          prompt: buildNavPrompt(),
           source: { type: 'camera', cameraFacing: 'environment' },
+          outputSchema: {
+            type: 'object',
+            properties: {
+              adjust_dx: { type: 'number', description: 'Lateral X adjustment for obstacle avoidance (-0.15 to 0.15, 0 if clear)' },
+              adjust_dz: { type: 'number', description: 'Lateral Z adjustment for obstacle avoidance (-0.15 to 0.15, 0 if clear)' },
+              reasoning: { type: 'string', description: 'What you see ahead' },
+            },
+            required: ['adjust_dx', 'adjust_dz', 'reasoning'],
+          },
           onResult: (result) => {
-            overshootResultEl.textContent = result.result;
-            log(`Overshoot: ${result.result.substring(0, 80)}...`);
+            if (!result.ok) {
+              // Still move deterministically even if VLM errors
+              const done = stepTowardWaypoint();
+              if (done) { vision.stop(); overshootResultEl.textContent = 'Path complete!'; return; }
+              overshootResultEl.textContent = `VLM error (still moving): ${result.error || 'unknown'}`;
+              vision.updatePrompt(buildNavPrompt());
+              return;
+            }
+
+            let cmd;
+            try {
+              let raw = result.result.trim();
+              if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+              cmd = JSON.parse(raw);
+            } catch {
+              // Parse failed — move without adjustment
+              const done = stepTowardWaypoint();
+              if (done) { vision.stop(); overshootResultEl.textContent = 'Path complete!'; return; }
+              vision.updatePrompt(buildNavPrompt());
+              return;
+            }
+
+            // Clamp obstacle-avoidance adjustments
+            const adjDx = Math.max(-0.15, Math.min(0.15, cmd.adjust_dx || 0));
+            const adjDz = Math.max(-0.15, Math.min(0.15, cmd.adjust_dz || 0));
+
+            const done = stepTowardWaypoint(adjDx, adjDz);
+
+            const wp = PATH_WAYPOINTS[currentWaypointIdx];
+            const dist = Math.hypot(cube.position.x - wp.x, cube.position.z - wp.z);
+            const wpLabel = `WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`;
+            overshootResultEl.textContent = `${wpLabel} | dist:${dist.toFixed(2)} adj:(${adjDx.toFixed(2)},${adjDz.toFixed(2)})\n${cmd.reasoning || ''}`;
+            log(`Nav → (${cube.position.x.toFixed(2)}, ${cube.position.z.toFixed(2)}) | ${cmd.reasoning || ''}`);
+
+            if (done) {
+              overshootResultEl.textContent = 'Path complete!';
+              log('Path following complete!');
+              vision.stop();
+              return;
+            }
+
+            vision.updatePrompt(buildNavPrompt());
           },
           onError: (error) => {
             overshootResultEl.textContent = `Error: ${error.message}`;
@@ -210,10 +381,8 @@
         });
 
         await vision.start();
-        log('Overshoot vision stream started');
-        overshootResultEl.textContent = 'Streaming...';
-
-        // Store reference for cleanup / prompt updates
+        log('Overshoot path-following started');
+        overshootResultEl.textContent = `Following path: ${PATH_WAYPOINTS.length - 1} waypoints`;
         window._overshootVision = vision;
       } catch (err) {
         overshootResultEl.textContent = `Failed: ${err.message}`;
@@ -246,8 +415,10 @@
             break;
 
           case 'updateRotation':
-            cube.quaternion.set(cmd.x, cmd.y, cmd.z, cmd.w);
-            log(`Rotated cube to (${cmd.x}, ${cmd.y}, ${cmd.z}, ${cmd.w})`);
+            cube.rotation.x += cmd.dx;
+            cube.rotation.y += cmd.dy;
+            cube.rotation.z += cmd.dz;
+            log(`Rotated cube by (${cmd.dx.toFixed(2)}, ${cmd.dy.toFixed(2)}, ${cmd.dz.toFixed(2)})`);
             break;
 
           case 'cameraUpdate':

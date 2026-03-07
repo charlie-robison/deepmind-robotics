@@ -44,10 +44,9 @@ class PositionRequest(BaseModel):
     dz: float
 
 class RotationRequest(BaseModel):
-    x: float
-    y: float
-    z: float
-    w: float ## By how much to rotate.
+    dx: float  ## Euler delta rotation around X (pitch)
+    dy: float  ## Euler delta rotation around Y (yaw)
+    dz: float  ## Euler delta rotation around Z (roll)
 
 class CameraRequest(BaseModel):
     zoom_percentage: float
@@ -205,7 +204,7 @@ async def update_position(request: PositionRequest) -> DepthResult:
 
 @app.post("/updateRotation")
 async def update_rotation(request: RotationRequest) -> DepthResult:
-    return await _update_rotation(request.x, request.y, request.z, request.w)
+    return await _update_rotation(request.dx, request.dy, request.dz)
 
 
 @app.post("/updateCamera")
