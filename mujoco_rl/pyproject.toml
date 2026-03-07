@@ -1,0 +1,18 @@
+[project]
+name = "livingroom-rl"
+version = "0.1.0"
+description = "RL training pipeline for living room navigation using MuJoCo"
+requires-python = ">=3.12"
+dependencies = [
+    "gymnasium>=1.2.3",
+    "imageio[ffmpeg]>=2.37.2",
+    "mujoco>=3.5.0",
+    "numpy>=2.4.2",
+    "stable-baselines3>=2.4.0",
+    "torch>=2.10.0",
+    "motor>=3.3.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["trajectories*", "checkpoints*"]
