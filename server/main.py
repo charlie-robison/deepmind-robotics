@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 
 from tool_calls.depth import DepthResult
 from tool_calls.three_js import camera_update, update_position as _update_position, update_rotation as _update_rotation
@@ -43,10 +44,9 @@ class PositionRequest(BaseModel):
     dz: float
 
 class RotationRequest(BaseModel):
-    x: float
-    y: float
-    z: float
-    w: float ## By how much to rotate.
+    dx: float  ## Euler delta rotation around X (pitch)
+    dy: float  ## Euler delta rotation around Y (yaw)
+    dz: float  ## Euler delta rotation around Z (roll)
 
 class CameraRequest(BaseModel):
     zoom_percentage: float
@@ -103,6 +103,10 @@ class LogResponse(BaseModel):
     toolCall: str
     pose_fk: str | None
     base64_image: str | None
+
+@app.get("/overshoot-key")
+async def overshoot_key():
+    return {"key": os.environ.get("OVERSHOOT_API", "")}
 
 @app.get("/")
 async def root():
@@ -200,7 +204,7 @@ async def update_position(request: PositionRequest) -> DepthResult:
 
 @app.post("/updateRotation")
 async def update_rotation(request: RotationRequest) -> DepthResult:
-    return await _update_rotation(request.x, request.y, request.z, request.w)
+    return await _update_rotation(request.dx, request.dy, request.dz)
 
 
 @app.post("/updateCamera")
