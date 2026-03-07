@@ -37,9 +37,24 @@
     #overshoot-panel .label {
       color: #fff; font-size: 11px; margin-bottom: 6px; opacity: 0.7;
     }
+    #obstacle-flash {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 100; font-family: monospace; font-size: 80px; font-weight: bold;
+      color: #ff0000; text-shadow: 0 0 30px #ff0000, 0 0 60px #ff4444;
+      pointer-events: none; opacity: 0; transition: opacity 0.1s;
+    }
+    #obstacle-flash.visible {
+      opacity: 1;
+      animation: flash-pulse 0.5s ease-out;
+    }
+    @keyframes flash-pulse {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    }
   </style>
 </head>
 <body>
+  <div id="obstacle-flash">OBSTACLE!</div>
   <div id="status">Connecting...</div>
   <div id="log"></div>
   <div id="topdown"></div>
@@ -206,6 +221,73 @@
     }
     drawPath();
 
+    // Physical obstacles — tall red pillars placed along the path after detection
+    let pillarMeshes = [];
+    let pillarPositions = []; // {x, z} for proximity checks
+    const PILLAR_DETECT_RADIUS = 1.5; // distance to start avoiding
+    const DODGE_AMOUNT = 0.6; // lateral dodge distance
+
+    function createPillar(x, z) {
+      const geo = new THREE.BoxGeometry(0.4, 3, 0.4);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xff4444 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, 1.5, z);
+      scene.add(mesh);
+      pillarMeshes.push(mesh);
+      pillarPositions.push({ x, z });
+      return mesh;
+    }
+
+    function spawnPillarsAlongPath() {
+      pillarMeshes.forEach(m => scene.remove(m));
+      pillarMeshes = [];
+      pillarPositions = [];
+
+      for (let i = 0; i < PATH_WAYPOINTS.length - 1; i++) {
+        const a = PATH_WAYPOINTS[i];
+        const b = PATH_WAYPOINTS[i + 1];
+        const mx = (a.x + b.x) / 2;
+        const mz = (a.z + b.z) / 2;
+        createPillar(mx, mz);
+      }
+      log(`Spawned ${pillarMeshes.length} pillars along path`);
+    }
+
+    // Find the nearest pillar within detection radius
+    function nearestPillar(px, pz) {
+      let closest = null;
+      let minDist = Infinity;
+      for (const p of pillarPositions) {
+        const d = Math.hypot(px - p.x, pz - p.z);
+        if (d < minDist) { minDist = d; closest = p; }
+      }
+      return minDist < PILLAR_DETECT_RADIUS ? { pillar: closest, dist: minDist } : null;
+    }
+
+    // Compute lateral dodge: perpendicular to travel direction, away from pillar
+    function computeDodge(pillar, travelDx, travelDz) {
+      // Perpendicular to travel direction (left = (-dz, dx), right = (dz, -dx))
+      const len = Math.hypot(travelDx, travelDz) || 1;
+      const perpLx = -travelDz / len;
+      const perpLz = travelDx / len;
+
+      // Vector from robot to pillar
+      const toPillarX = pillar.x - cube.position.x;
+      const toPillarZ = pillar.z - cube.position.z;
+
+      // Dot with left perpendicular: positive = pillar is to the left
+      const dot = toPillarX * perpLx + toPillarZ * perpLz;
+
+      // Dodge in the opposite direction of the pillar
+      if (dot > 0) {
+        // Pillar is to the left, dodge right
+        return { dx: -perpLx * DODGE_AMOUNT, dz: -perpLz * DODGE_AMOUNT, dir: 'right' };
+      } else {
+        // Pillar is to the right, dodge left
+        return { dx: perpLx * DODGE_AMOUNT, dz: perpLz * DODGE_AMOUNT, dir: 'left' };
+      }
+    }
+
     // Trail: track where the cube has actually been
     const trailPoints = [cube.position.clone()];
     const trailGeom = new THREE.BufferGeometry().setFromPoints(trailPoints);
@@ -217,11 +299,11 @@
       trailGeom.setFromPoints(trailPoints);
     }
 
-    // Rotate cube so the FP camera faces the final goal
+    // Rotate cube so the FP camera faces the current waypoint (direction of travel)
     function faceGoal() {
-      const goal = PATH_WAYPOINTS[PATH_WAYPOINTS.length - 1];
-      const dx = goal.x - cube.position.x;
-      const dz = goal.z - cube.position.z;
+      const wp = PATH_WAYPOINTS[currentWaypointIdx];
+      const dx = wp.x - cube.position.x;
+      const dz = wp.z - cube.position.z;
       const targetYaw = Math.atan2(dx, dz) + Math.PI;
       let diff = targetYaw - cube.rotation.y;
       while (diff > Math.PI) diff -= 2 * Math.PI;
@@ -322,22 +404,21 @@
       const dx = wp.x - pos.x;
       const dz = wp.z - pos.z;
       const dist = Math.hypot(dx, dz);
-      return `You are an obstacle-avoidance system for a robot navigating a 3D room. You see the robot's first-person view.
+      const heading = (cube.rotation.y * 180 / Math.PI) % 360;
+      return `Obstacle avoidance robot. First-person camera view.
 
-Current position: x=${pos.x.toFixed(2)}, z=${pos.z.toFixed(2)}
-Target waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}: x=${wp.x.toFixed(2)}, z=${wp.z.toFixed(2)} (distance: ${dist.toFixed(2)})
-Heading: ${(cube.rotation.y * 180 / Math.PI).toFixed(0)} degrees
+Position: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}). Target: (${wp.x.toFixed(1)}, ${wp.z.toFixed(1)}), dist=${dist.toFixed(1)}.
 
-The robot is following a deterministic path detected from a top-down view.
-Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
-- If the path ahead is CLEAR of obstacles, output adjust_dx=0 and adjust_dz=0 (stay on path).
-- If you see furniture, walls, or objects BLOCKING the path ahead, output a lateral adjustment (max 0.15 per axis) to steer AROUND the obstacle temporarily.
-- Once the obstacle is passed, return to adjust_dx=0, adjust_dz=0 to rejoin the planned path.
-- Prioritize AVOIDING COLLISIONS over staying exactly on the path.
-- "reasoning": describe what you see (clear floor, obstacle on left/right, deviating to avoid, etc.)`;
+RED PILLARS are obstacles. If you see ANY red pillar anywhere in the image — left, right, center, near or far — you MUST output nonzero adjust values to steer away from it.
+- Pillar on left or center-left: adjust_dx=0.4 (steer right)
+- Pillar on right or center-right: adjust_dx=-0.4 (steer left)
+- Pillar dead center: adjust_dx=0.4 (dodge right)
+- No red pillars visible at all: adjust_dx=0, adjust_dz=0
+
+Keep reasoning under 15 words.`;
     }
 
-    function stepTowardWaypoint(adjustDx = 0, adjustDz = 0) {
+    function stepTowardWaypoint(vlmDir = null) {
       const wp = PATH_WAYPOINTS[currentWaypointIdx];
       const dx = wp.x - cube.position.x;
       const dz = wp.z - cube.position.z;
@@ -347,15 +428,41 @@ Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
         if (currentWaypointIdx < PATH_WAYPOINTS.length - 1) {
           currentWaypointIdx++;
           log(`Reached waypoint ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`);
-          return false;
+          return { done: false, dodging: false };
         }
-        return true; // done
+        return { done: true, dodging: false };
       }
 
+      // Forward component: always move toward waypoint
       const step = Math.min(STEP_SIZE, dist);
-      let moveDx = (dx / dist) * step + adjustDx;
-      let moveDz = (dz / dist) * step + adjustDz;
+      const fwdDx = (dx / dist) * step;
+      const fwdDz = (dz / dist) * step;
 
+      // Check proximity to pillars
+      const nearby = nearestPillar(cube.position.x, cube.position.z);
+      let moveDx = fwdDx;
+      let moveDz = fwdDz;
+      let dodging = false;
+
+      if (nearby) {
+        // Compute lateral dodge perpendicular to travel direction
+        const dodge = computeDodge(nearby.pillar, dx, dz);
+        // Scale dodge by how close we are (stronger when closer)
+        const strength = 1 - (nearby.dist / PILLAR_DETECT_RADIUS);
+        moveDx += dodge.dx * strength;
+        moveDz += dodge.dz * strength;
+        dodging = true;
+        log(`Dodging ${dodge.dir} (pillar at ${nearby.pillar.x.toFixed(1)},${nearby.pillar.z.toFixed(1)}, dist=${nearby.dist.toFixed(2)})`);
+
+        // Flash obstacle warning
+        const flashEl = document.getElementById('obstacle-flash');
+        flashEl.classList.remove('visible');
+        void flashEl.offsetWidth;
+        flashEl.classList.add('visible');
+        setTimeout(() => flashEl.classList.remove('visible'), 500);
+      }
+
+      // Clamp total movement to step size
       const mag = Math.hypot(moveDx, moveDz);
       if (mag > STEP_SIZE) {
         moveDx = (moveDx / mag) * STEP_SIZE;
@@ -382,7 +489,7 @@ Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
         }).catch(() => {});
       }
 
-      return false;
+      return { done: false, dodging };
     }
 
     // =========================================================================
@@ -434,12 +541,14 @@ Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
         // Reset navigation state and redraw path
         currentWaypointIdx = 1;
         drawPath();
+        spawnPillarsAlongPath();
         log(`Final path: ${PATH_WAYPOINTS.map(w => `(${w.x.toFixed(1)},${w.z.toFixed(1)})`).join(' -> ')}`);
 
         // Small delay so the user can see the planned path before navigation starts
         await new Promise(r => setTimeout(r, 2000));
 
         // ---- PHASE 2: Navigate with real-time obstacle avoidance ----
+        navActive = true;
         log('Phase 2: Starting real-time navigation with Overshoot...');
         const canvasStream = renderer.domElement.captureStream(10);
 
@@ -457,43 +566,28 @@ Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
           outputSchema: {
             type: 'object',
             properties: {
-              adjust_dx: { type: 'number', description: 'Lateral X adjustment for obstacle avoidance (-0.15 to 0.15, 0 if clear)' },
-              adjust_dz: { type: 'number', description: 'Lateral Z adjustment for obstacle avoidance (-0.15 to 0.15, 0 if clear)' },
-              reasoning: { type: 'string', description: 'What you see ahead' },
+              adjust_dx: { type: 'number', description: 'Lateral X adjustment for obstacle avoidance (-0.5 to 0.5, 0 if clear)' },
+              adjust_dz: { type: 'number', description: 'Lateral Z adjustment for obstacle avoidance (-0.5 to 0.5, 0 if clear)' },
+              reasoning: { type: 'string', description: 'Brief: what you see (max 20 words)' },
             },
             required: ['adjust_dx', 'adjust_dz', 'reasoning'],
           },
           onResult: (result) => {
-            if (!result.ok) {
-              const done = stepTowardWaypoint();
-              if (done) { vision.stop(); overshootResultEl.textContent = 'Path complete!'; return; }
-              overshootResultEl.textContent = `VLM error (still moving): ${result.error || 'unknown'}`;
-              vision.updatePrompt(buildNavPrompt());
-              return;
+            // Each VLM response triggers one step — proximity handles dodging
+            let reasoning = '';
+            if (result.ok) {
+              const raw = (result.result || '').trim();
+              const reasonMatch = raw.match(/"reasoning"\s*:\s*"([^"]*)/);
+              reasoning = reasonMatch ? reasonMatch[1] : raw.substring(0, 80);
             }
 
-            let cmd;
-            try {
-              let raw = result.result.trim();
-              if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-              cmd = JSON.parse(raw);
-            } catch {
-              const done = stepTowardWaypoint();
-              if (done) { vision.stop(); overshootResultEl.textContent = 'Path complete!'; return; }
-              vision.updatePrompt(buildNavPrompt());
-              return;
-            }
-
-            const adjDx = Math.max(-0.15, Math.min(0.15, cmd.adjust_dx || 0));
-            const adjDz = Math.max(-0.15, Math.min(0.15, cmd.adjust_dz || 0));
-
-            const done = stepTowardWaypoint(adjDx, adjDz);
+            const { done, dodging } = stepTowardWaypoint();
 
             const wp = PATH_WAYPOINTS[currentWaypointIdx];
             const dist = Math.hypot(cube.position.x - wp.x, cube.position.z - wp.z);
             const wpLabel = `WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`;
-            overshootResultEl.textContent = `${wpLabel} | dist:${dist.toFixed(2)} adj:(${adjDx.toFixed(2)},${adjDz.toFixed(2)})\n${cmd.reasoning || ''}`;
-            log(`Nav -> (${cube.position.x.toFixed(2)}, ${cube.position.z.toFixed(2)}) | ${cmd.reasoning || ''}`);
+            const status = dodging ? 'DODGING' : 'clear';
+            overshootResultEl.textContent = `${wpLabel} | dist:${dist.toFixed(2)} | ${status}\n${reasoning}`;
 
             if (done) {
               overshootResultEl.textContent = 'Path complete!';
@@ -522,6 +616,9 @@ Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
 
     initOvershoot();
 
+    // Flag to prevent WS echo from double-applying nav moves
+    let navActive = false;
+
     // WebSocket connection
     function connect() {
       const ws = new WebSocket('ws://localhost:8000/ws');
@@ -534,6 +631,12 @@ Your job is to check for obstacles and TEMPORARILY DEVIATE when needed:
 
       ws.onmessage = (event) => {
         const cmd = JSON.parse(event.data);
+
+        // Skip position/rotation echoes when nav is driving movement
+        if (navActive && (cmd.action === 'updatePosition' || cmd.action === 'updateRotation')) {
+          return;
+        }
+
         log(`Received: ${JSON.stringify(cmd)}`);
 
         switch (cmd.action) {
