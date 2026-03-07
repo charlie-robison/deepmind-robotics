@@ -27,6 +27,16 @@
       background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px;
       pointer-events: none;
     }
+    #overshoot-panel {
+      position: fixed; bottom: 10px; right: 10px; z-index: 10;
+      background: rgba(0,0,0,0.8); color: #0ff; padding: 12px 16px;
+      font-family: monospace; font-size: 12px; border-radius: 6px;
+      max-width: 400px; max-height: 200px; overflow-y: auto;
+      border: 1px solid rgba(0,255,255,0.3);
+    }
+    #overshoot-panel .label {
+      color: #fff; font-size: 11px; margin-bottom: 6px; opacity: 0.7;
+    }
   </style>
 </head>
 <body>
@@ -34,12 +44,19 @@
   <div id="log"></div>
   <div id="topdown"></div>
   <div id="topdown-label">Top Down</div>
+  <div id="overshoot-panel">
+    <div class="label">Overshoot Vision</div>
+    <div id="overshoot-result">Initializing...</div>
+  </div>
 
   <script type="importmap">
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+        "overshoot": "https://esm.sh/overshoot@2.0.0-alpha.7",
+        "livekit-client": "https://esm.sh/livekit-client",
+        "hls.js": "https://esm.sh/hls.js"
       }
     }
   </script>
@@ -48,6 +65,7 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { RealtimeVision } from 'overshoot';
 
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
@@ -149,6 +167,61 @@
       renderer.render(scene, fpCamera);
       return renderer.domElement.toDataURL('image/png');
     }
+
+    // --- Overshoot: stream the Three.js canvas to a VLM ---
+    const overshootResultEl = document.getElementById('overshoot-result');
+
+    async function initOvershoot() {
+      try {
+        // Fetch the API key from the server
+        const keyResp = await fetch('/overshoot-key');
+        const { key } = await keyResp.json();
+        if (!key) {
+          overshootResultEl.textContent = 'No API key configured';
+          log('Set OVERSHOOT_API env var on the server');
+          return;
+        }
+
+        // Capture the main renderer canvas as a MediaStream
+        const canvasStream = renderer.domElement.captureStream(10); // 10 fps
+
+        // Override getUserMedia so the SDK's 'camera' source picks up our canvas stream
+        const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+          if (constraints && constraints.video) {
+            return canvasStream;
+          }
+          return originalGetUserMedia(constraints);
+        };
+
+        const vision = new RealtimeVision({
+          apiKey: key,
+          model: 'google/gemini-2.0-flash-001',
+          prompt: 'Describe what you see in this 3D scene. Identify objects, their positions, and any notable details.',
+          source: { type: 'camera', cameraFacing: 'environment' },
+          onResult: (result) => {
+            overshootResultEl.textContent = result.result;
+            log(`Overshoot: ${result.result.substring(0, 80)}...`);
+          },
+          onError: (error) => {
+            overshootResultEl.textContent = `Error: ${error.message}`;
+            log(`Overshoot error: ${error.message}`);
+          },
+        });
+
+        await vision.start();
+        log('Overshoot vision stream started');
+        overshootResultEl.textContent = 'Streaming...';
+
+        // Store reference for cleanup / prompt updates
+        window._overshootVision = vision;
+      } catch (err) {
+        overshootResultEl.textContent = `Failed: ${err.message}`;
+        log(`Overshoot init failed: ${err.message}`);
+      }
+    }
+
+    initOvershoot();
 
     // WebSocket connection
     function connect() {

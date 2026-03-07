@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 
 from tool_calls.depth import DepthResult
 from tool_calls.three_js import camera_update, update_position as _update_position, update_rotation as _update_rotation
@@ -103,6 +104,10 @@ class LogResponse(BaseModel):
     toolCall: str
     pose_fk: str | None
     base64_image: str | None
+
+@app.get("/overshoot-key")
+async def overshoot_key():
+    return {"key": os.environ.get("OVERSHOOT_API", "")}
 
 @app.get("/")
 async def root():
