@@ -35,7 +35,7 @@
     #left-view .view-label { color: #4488ff; }
     #right-view .view-label { color: #ff4444; }
     #scoreboard {
-      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
       z-index: 20; background: rgba(0,0,0,0.85); color: #fff;
       font-family: monospace; font-size: 14px; padding: 10px 20px;
       border-radius: 6px; border: 1px solid rgba(255,255,255,0.2);
@@ -57,11 +57,11 @@
       background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px;
     }
     #round-log {
-      position: fixed; top: 60px; left: 10px; z-index: 10;
+      position: fixed; top: 56px; left: 10px; z-index: 10;
       background: rgba(0,0,0,0.9); color: #fff;
       font-family: monospace; font-size: 13px;
       padding: 14px 16px; border-radius: 8px;
-      width: 300px; max-height: calc(100vh - 80px); overflow-y: auto;
+      width: 300px; max-height: calc(100vh - 56px); overflow-y: auto;
       border: 1px solid rgba(255,255,255,0.2);
     }
     #round-log .rl-title {
@@ -247,13 +247,18 @@
     }, undefined, (err) => log(`GLB error: ${err.message}`));
 
     // =========================================================================
-    // OBJECT (blue cube agent)
+    // OBJECT (drone GLB agent)
     // =========================================================================
-    const objectGeo = new THREE.BoxGeometry(0.2, 0.8, 0.2);
-    const objectMat = new THREE.MeshStandardMaterial({ color: 0x4488ff });
-    const objectMesh = new THREE.Mesh(objectGeo, objectMat);
+    const objectMesh = new THREE.Object3D();
     objectMesh.position.set(-2.5, 0.4, 3.0);
     scene.add(objectMesh);
+
+    gltfLoader.load('/static/drone.glb', (gltf) => {
+      const model = gltf.scene;
+      model.scale.set(0.4, 0.4, 0.4);
+      objectMesh.add(model);
+      log('Loaded drone model for VLM 1');
+    }, undefined, (err) => log(`Drone GLB error: ${err.message}`));
 
     // First-person camera for object
     const objectCam = new THREE.PerspectiveCamera(90, 1, 0.01, 1000);
@@ -261,13 +266,19 @@
     objectCam.position.set(0, 0.4, 0);
 
     // =========================================================================
-    // ENEMY (red cube agent)
+    // ENEMY (bird GLB agent)
     // =========================================================================
-    const enemyGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-    const enemyMat = new THREE.MeshStandardMaterial({ color: 0xff4444, emissive: 0x881111, emissiveIntensity: 0.5 });
-    const enemyMesh = new THREE.Mesh(enemyGeo, enemyMat);
+    const enemyMesh = new THREE.Object3D();
     enemyMesh.position.set(0, 0.6, 0);
     scene.add(enemyMesh);
+
+    gltfLoader.load('/static/bird.glb', (gltf) => {
+      const model = gltf.scene;
+      model.scale.set(0.4, 0.4, 0.4);
+      model.rotation.y = Math.PI;
+      enemyMesh.add(model);
+      log('Loaded bird model for VLM 2');
+    }, undefined, (err) => log(`Bird GLB error: ${err.message}`));
 
     const enemyLight = new THREE.PointLight(0xff4444, 1.5, 3);
     enemyMesh.add(enemyLight);
@@ -275,7 +286,7 @@
     // First-person camera for enemy
     const enemyCam = new THREE.PerspectiveCamera(90, 1, 0.01, 1000);
     enemyMesh.add(enemyCam);
-    enemyCam.position.set(0, 0.2, 0);
+    enemyCam.position.set(0, 0.8, -1.0);
 
     // =========================================================================
     // RENDERERS: left (object), right (enemy), top-down
