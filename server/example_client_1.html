@@ -5,6 +5,21 @@
   <title>Three.js WebSocket Example</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
+    #nav-bar {
+      position: fixed; top: 0; left: 0; width: 100%; z-index: 100;
+      display: flex; gap: 8px; padding: 10px 16px;
+      background: rgba(0,0,0,0.85); border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+    #nav-bar a {
+      text-decoration: none; font-family: monospace; font-size: 13px;
+      padding: 6px 16px; border-radius: 4px; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.25); color: #aaa;
+      transition: background 0.15s, color 0.15s;
+    }
+    #nav-bar a:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    #nav-bar a.active {
+      background: #4488ff; color: #fff; border-color: #4488ff;
+    }
     #status {
       position: fixed; top: 10px; left: 10px; color: #fff;
       font-family: monospace; font-size: 14px; z-index: 10;
@@ -40,6 +55,10 @@
   </style>
 </head>
 <body>
+  <div id="nav-bar">
+    <a href="/client-1" class="active">Create Path</a>
+    <a href="/competition">Run Competition</a>
+  </div>
   <div id="status">Connecting...</div>
   <div id="log"></div>
   <div id="topdown"></div>

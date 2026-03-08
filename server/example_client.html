@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Agent vs Agent Training</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    #nav-bar {
+      position: fixed; top: 0; left: 0; width: 100%; z-index: 200;
+      display: flex; gap: 8px; padding: 10px 16px;
+      background: rgba(0,0,0,0.85); border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+    #nav-bar a {
+      text-decoration: none; font-family: monospace; font-size: 13px;
+      padding: 6px 16px; border-radius: 4px; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.25); color: #aaa;
+      transition: background 0.15s, color 0.15s;
+    }
+    #nav-bar a:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    #nav-bar a.active {
+      background: #ff4444; color: #fff; border-color: #ff4444;
+    }
+    #split-container {
+      display: flex; width: 100vw; height: 100vh;
+    }
+    #left-view, #right-view {
+      flex: 1; position: relative; border-right: 2px solid #333;
+    }
+    #right-view { border-right: none; }
+    .view-label {
+      position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+      color: #fff; font-family: monospace; font-size: 14px; z-index: 10;
+      background: rgba(0,0,0,0.7); padding: 4px 12px; border-radius: 4px;
+    }
+    #left-view .view-label { color: #4488ff; }
+    #right-view .view-label { color: #ff4444; }
+    #scoreboard {
+      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 20; background: rgba(0,0,0,0.85); color: #fff;
+      font-family: monospace; font-size: 14px; padding: 10px 20px;
+      border-radius: 6px; border: 1px solid rgba(255,255,255,0.2);
+      display: flex; gap: 24px; align-items: center;
+    }
+    #scoreboard .agent-score { text-align: center; }
+    #scoreboard .agent-score.object { color: #4488ff; }
+    #scoreboard .agent-score.enemy { color: #ff4444; }
+    #scoreboard .moves { color: #aaa; }
+    #scoreboard .turn-indicator { color: #0f0; font-size: 12px; }
+    #topdown {
+      position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 10; border: 2px solid rgba(255,255,255,0.3); border-radius: 6px;
+      overflow: hidden;
+    }
+    #topdown-label {
+      position: fixed; bottom: 365px; left: 50%; transform: translateX(-50%);
+      z-index: 11; color: #fff; font-family: monospace; font-size: 11px;
+      background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 3px;
+    }
+    #round-log {
+      position: fixed; top: 60px; left: 10px; z-index: 10;
+      background: rgba(0,0,0,0.9); color: #fff;
+      font-family: monospace; font-size: 13px;
+      padding: 14px 16px; border-radius: 8px;
+      width: 300px; max-height: calc(100vh - 80px); overflow-y: auto;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    #round-log .rl-title {
+      color: #fff; font-size: 15px; font-weight: bold; margin-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;
+      letter-spacing: 1px;
+    }
+    #round-log .round-entry {
+      margin-bottom: 10px; padding: 8px 10px; border-radius: 5px;
+      background: rgba(255,255,255,0.08); border-left: 4px solid #555;
+    }
+    #round-log .round-entry.object-win { border-left-color: #4488ff; background: rgba(68,136,255,0.08); }
+    #round-log .round-entry.enemy-win { border-left-color: #ff4444; background: rgba(255,68,68,0.08); }
+    #round-log .round-entry .re-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;
+    }
+    #round-log .round-entry .re-round { color: #fff; font-weight: bold; font-size: 13px; }
+    #round-log .round-entry .re-winner { font-weight: bold; font-size: 14px; }
+    #round-log .round-entry .re-winner.obj { color: #66aaff; }
+    #round-log .round-entry .re-winner.enm { color: #ff6666; }
+    #round-log .round-entry .re-moves { color: #aaa; font-size: 12px; }
+    #round-log .round-entry .re-detail { color: #ccc; font-size: 11px; margin-top: 4px; }
+    #round-log .round-entry .re-label { color: #888; }
+    #round-log .round-entry .re-narrative { color: #ddd; font-size: 11px; margin-top: 5px; font-style: italic; line-height: 1.4; }
+    #round-log .round-entry .re-sequence { color: #888; font-size: 10px; margin-top: 4px; word-break: break-all; }
+    #round-graph {
+      margin-top: 12px; padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.15);
+    }
+    #round-graph .rg-title {
+      color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+    #round-graph canvas {
+      width: 100%; border-radius: 4px;
+      background: rgba(255,255,255,0.03);
+    }
+    #round-graph .rg-legend {
+      display: flex; gap: 14px; margin-top: 6px; font-size: 10px; color: #888;
+    }
+    #round-graph .rg-legend .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle;
+    }
+    #log {
+      position: fixed; bottom: 10px; left: 10px; color: #0f0;
+      font-family: monospace; font-size: 10px; z-index: 10;
+      background: rgba(0,0,0,0.7); padding: 6px 10px; border-radius: 4px;
+      max-height: 120px; overflow-y: auto; width: 260px;
+    }
+    #overshoot-panel {
+      position: fixed; bottom: 10px; right: 10px; z-index: 10;
+      background: rgba(0,0,0,0.8); color: #0ff; padding: 10px 14px;
+      font-family: monospace; font-size: 11px; border-radius: 6px;
+      max-width: 320px; max-height: 180px; overflow-y: auto;
+      border: 1px solid rgba(0,255,255,0.3);
+    }
+    #overshoot-panel .label { color: #fff; font-size: 11px; margin-bottom: 4px; opacity: 0.7; }
+    #collide-flash {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 100; font-family: monospace; font-size: 80px; font-weight: bold;
+      color: #ff00ff; text-shadow: 0 0 40px #ff00ff, 0 0 80px #9900ff;
+      pointer-events: none; opacity: 0; transition: opacity 0.1s;
+    }
+    #collide-flash.visible {
+      opacity: 1; animation: collide-pulse 0.8s ease-out;
+    }
+    #win-banner {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 200; font-family: monospace; font-size: 48px; font-weight: bold;
+      pointer-events: none; opacity: 0; transition: opacity 0.3s;
+      text-shadow: 0 0 30px currentColor;
+    }
+    #win-banner.visible { opacity: 1; }
+    @keyframes collide-pulse {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(1.5); }
+      50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div id="nav-bar">
+    <a href="/client-1">Create Path</a>
+    <a href="/competition" class="active">Run Competition</a>
+  </div>
+  <div id="collide-flash">CAUGHT!</div>
+  <div id="win-banner"></div>
+
+  <div id="scoreboard">
+    <div class="agent-score object">
+      <div>VLM 1</div>
+      <div id="object-wins">Wins: 0</div>
+    </div>
+    <div>
+      <div class="moves" id="round-number">Round: 1</div>
+      <div class="moves" id="move-count">Moves: 0</div>
+      <div class="turn-indicator" id="turn-indicator">--</div>
+    </div>
+    <div class="agent-score enemy">
+      <div>VLM 2</div>
+      <div id="enemy-wins">Wins: 0</div>
+    </div>
+  </div>
+
+  <div id="split-container">
+    <div id="left-view">
+      <div class="view-label">VLM 1 (Blue)</div>
+    </div>
+    <div id="right-view">
+      <div class="view-label">VLM 2 (Red)</div>
+    </div>
+  </div>
+
+  <div id="round-log">
+    <div class="rl-title">ROUND HISTORY</div>
+    <div id="round-graph">
+      <div class="rg-title">TRAJECTORY MAP</div>
+      <canvas id="graph-canvas" width="280" height="280"></canvas>
+      <div class="rg-legend">
+        <span><span class="dot" style="background:#4488ff"></span>VLM 1 path</span>
+        <span><span class="dot" style="background:#ff4444"></span>VLM 2 path</span>
+      </div>
+      <div class="rg-legend" style="margin-top:2px">
+        <span style="color:#555">Latest round brightest</span>
+      </div>
+    </div>
+    <div id="round-log-entries"></div>
+  </div>
+  <div id="topdown"></div>
+  <div id="topdown-label">Top Down</div>
+  <div id="log"></div>
+  <div id="overshoot-panel">
+    <div class="label">Agent Vision</div>
+    <div id="overshoot-result">Initializing...</div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+        "overshoot": "https://esm.sh/overshoot@2.0.0-alpha.7",
+        "livekit-client": "https://esm.sh/livekit-client",
+        "hls.js": "https://esm.sh/hls.js"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { RealtimeVision } from 'overshoot';
+
+    const logEl = document.getElementById('log');
+    const overshootResultEl = document.getElementById('overshoot-result');
+    const turnIndicatorEl = document.getElementById('turn-indicator');
+    const moveCountEl = document.getElementById('move-count');
+    const objectWinsEl = document.getElementById('object-wins');
+    const enemyWinsEl = document.getElementById('enemy-wins');
+
+    function log(msg) {
+      const line = document.createElement('div');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // =========================================================================
+    // SCENE
+    // =========================================================================
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a2e);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(5, 10, 7);
+    scene.add(dirLight);
+
+    const gltfLoader = new GLTFLoader();
+    gltfLoader.load('/static/cozy_living_room_baked.glb', (gltf) => {
+      scene.add(gltf.scene);
+      log('Loaded environment');
+    }, undefined, (err) => log(`GLB error: ${err.message}`));
+
+    // =========================================================================
+    // OBJECT (blue cube agent)
+    // =========================================================================
+    const objectGeo = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+    const objectMat = new THREE.MeshStandardMaterial({ color: 0x4488ff });
+    const objectMesh = new THREE.Mesh(objectGeo, objectMat);
+    objectMesh.position.set(-2.5, 0.4, 3.0);
+    scene.add(objectMesh);
+
+    // First-person camera for object
+    const objectCam = new THREE.PerspectiveCamera(90, 1, 0.01, 1000);
+    objectMesh.add(objectCam);
+    objectCam.position.set(0, 0.4, 0);
+
+    // =========================================================================
+    // ENEMY (red cube agent)
+    // =========================================================================
+    const enemyGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+    const enemyMat = new THREE.MeshStandardMaterial({ color: 0xff4444, emissive: 0x881111, emissiveIntensity: 0.5 });
+    const enemyMesh = new THREE.Mesh(enemyGeo, enemyMat);
+    enemyMesh.position.set(0, 0.6, 0);
+    scene.add(enemyMesh);
+
+    const enemyLight = new THREE.PointLight(0xff4444, 1.5, 3);
+    enemyMesh.add(enemyLight);
+
+    // First-person camera for enemy
+    const enemyCam = new THREE.PerspectiveCamera(90, 1, 0.01, 1000);
+    enemyMesh.add(enemyCam);
+    enemyCam.position.set(0, 0.2, 0);
+
+    // =========================================================================
+    // RENDERERS: left (object), right (enemy), top-down
+    // =========================================================================
+    const leftView = document.getElementById('left-view');
+    const rightView = document.getElementById('right-view');
+
+    const objectRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    leftView.appendChild(objectRenderer.domElement);
+
+    const enemyRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    rightView.appendChild(enemyRenderer.domElement);
+
+    const topdownSize = 350;
+    const topdownRenderer = new THREE.WebGLRenderer({ antialias: true });
+    topdownRenderer.setSize(topdownSize, topdownSize);
+    document.getElementById('topdown').appendChild(topdownRenderer.domElement);
+
+    const topdownCamera = new THREE.OrthographicCamera(-3.5, 3.5, 3.5, -3.5, 0.1, 100);
+    topdownCamera.position.set(0, 20, 0);
+    topdownCamera.lookAt(0, 0, 0);
+
+    function resizeRenderers() {
+      const w = Math.floor(window.innerWidth / 2);
+      const h = window.innerHeight;
+      objectRenderer.setSize(w, h);
+      objectCam.aspect = w / h;
+      objectCam.updateProjectionMatrix();
+      enemyRenderer.setSize(w, h);
+      enemyCam.aspect = w / h;
+      enemyCam.updateProjectionMatrix();
+    }
+    resizeRenderers();
+    window.addEventListener('resize', resizeRenderers);
+
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
+    function faceToward(mesh, targetX, targetZ) {
+      const dx = targetX - mesh.position.x;
+      const dz = targetZ - mesh.position.z;
+      mesh.rotation.y = Math.atan2(dx, dz) + Math.PI;
+    }
+
+    // =========================================================================
+    // ANIMATION
+    // =========================================================================
+    function animate() {
+      requestAnimationFrame(animate);
+      // Enemy hover bob + always face the object
+      enemyMesh.position.y = 0.6 + Math.sin(Date.now() * 0.003) * 0.15;
+      faceToward(enemyMesh, objectMesh.position.x, objectMesh.position.z);
+
+      // Object always faces the enemy
+      faceToward(objectMesh, enemyMesh.position.x, enemyMesh.position.z);
+
+      objectRenderer.render(scene, objectCam);
+      enemyRenderer.render(scene, enemyCam);
+      topdownRenderer.render(scene, topdownCamera);
+    }
+    animate();
+
+    // =========================================================================
+    // PATH
+    // =========================================================================
+    let PATH_WAYPOINTS = [
+      { x: -2.5, z: 3.0 },   // start: bottom-left open floor
+      { x: 1.0, z: 3.0 },    // right along bottom (open hardwood)
+      { x: 1.0, z: -1.0 },   // up along right side (clear of furniture)
+      { x: 1.0, z: -2.8 },   // continue up on right side, above all furniture
+      { x: -2.3, z: -3.0 },  // cut left to the lamp
+    ];
+    let currentWaypointIdx = 1;
+    const WAYPOINT_THRESHOLD = 0.3;
+    const STEP_SIZE = 0.4;
+    const ENEMY_STEP_SIZE = 0.22;
+    const pathY = 0.05;
+    const COLLISION_RADIUS = 0.3;
+    const OBJECT_HEAD_START = 6; // object gets this many free moves before enemy starts
+
+    let pathLine = null;
+    let waypointDots = [];
+
+    function drawPath() {
+      if (pathLine) scene.remove(pathLine);
+      waypointDots.forEach(d => scene.remove(d));
+      waypointDots = [];
+
+      const pathPoints = PATH_WAYPOINTS.map(wp => new THREE.Vector3(wp.x, pathY, wp.z));
+      const pathGeom = new THREE.BufferGeometry().setFromPoints(pathPoints);
+      pathLine = new THREE.Line(pathGeom, new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 3 }));
+      scene.add(pathLine);
+
+      PATH_WAYPOINTS.forEach((wp, i) => {
+        const isStart = i === 0;
+        const isEnd = i === PATH_WAYPOINTS.length - 1;
+        const dotGeo = new THREE.SphereGeometry(isStart || isEnd ? 0.15 : 0.1, 12, 12);
+        const dotColor = isStart ? 0x0088ff : isEnd ? 0xffaa00 : 0x00ff00;
+        const dotMat = new THREE.MeshBasicMaterial({ color: dotColor });
+        const dot = new THREE.Mesh(dotGeo, dotMat);
+        dot.position.set(wp.x, pathY + 0.05, wp.z);
+        scene.add(dot);
+        waypointDots.push(dot);
+      });
+    }
+    drawPath();
+
+    // Trail
+    const trailPoints = [objectMesh.position.clone()];
+    const trailGeom = new THREE.BufferGeometry().setFromPoints(trailPoints);
+    const trailLine = new THREE.Line(trailGeom, new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 }));
+    scene.add(trailLine);
+
+    const enemyTrailPoints = [enemyMesh.position.clone()];
+    const enemyTrailGeom = new THREE.BufferGeometry().setFromPoints(enemyTrailPoints);
+    const enemyTrailLine = new THREE.Line(enemyTrailGeom, new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.5 }));
+    scene.add(enemyTrailLine);
+
+    // =========================================================================
+    // GAME STATE
+    // =========================================================================
+    let totalMoves = 0;
+    let objectWins = 0;
+    let enemyWins = 0;
+    let roundOver = false;
+    let roundNumber = 0;
+
+    // ---- ELO RATING SYSTEM ----
+    let objectElo = 1200;
+    let enemyElo = 1200;
+    const K_FACTOR = 32;
+
+    function updateElo(winner) {
+      const expectedObj = 1 / (1 + Math.pow(10, (enemyElo - objectElo) / 400));
+      const expectedEnm = 1 - expectedObj;
+      const objScore = winner === 'object' ? 1 : 0;
+      const enmScore = winner === 'enemy' ? 1 : 0;
+      objectElo = Math.round(objectElo + K_FACTOR * (objScore - expectedObj));
+      enemyElo = Math.round(enemyElo + K_FACTOR * (enmScore - expectedEnm));
+    }
+
+    // Streak tracking
+    let objectStreak = 0; // positive = win streak, negative = loss streak
+    let enemyStreak = 0;
+
+    function updateStreaks(winner) {
+      if (winner === 'object') {
+        objectStreak = objectStreak > 0 ? objectStreak + 1 : 1;
+        enemyStreak = enemyStreak < 0 ? enemyStreak - 1 : -1;
+      } else {
+        enemyStreak = enemyStreak > 0 ? enemyStreak + 1 : 1;
+        objectStreak = objectStreak < 0 ? objectStreak - 1 : -1;
+      }
+    }
+
+    function getAgentMood(elo, streak) {
+      if (streak >= 3) return 'dominant';
+      if (streak >= 1 && elo > 1250) return 'confident';
+      if (streak <= -3) return 'desperate';
+      if (streak <= -1 && elo < 1150) return 'struggling';
+      return 'neutral';
+    }
+
+    function buildEloContext(agent) {
+      const elo = agent === 'object' ? objectElo : enemyElo;
+      const oppElo = agent === 'object' ? enemyElo : objectElo;
+      const streak = agent === 'object' ? objectStreak : enemyStreak;
+      const mood = getAgentMood(elo, streak);
+      const eloDiff = elo - oppElo;
+
+      let ctx = `\n\nPERFORMANCE RATING: Your ELO is ${elo} (opponent: ${oppElo}).`;
+
+      if (streak > 0) ctx += ` You are on a ${streak}-win streak.`;
+      else if (streak < 0) ctx += ` You are on a ${Math.abs(streak)}-loss streak.`;
+
+      if (agent === 'object') {
+        switch (mood) {
+          case 'dominant':
+            ctx += ` You are dominating. Keep your current strategy but stay unpredictable — vary between straight, left, and right so the enemy can't predict you.`;
+            break;
+          case 'confident':
+            ctx += ` You are performing well. Maintain your approach but mix in occasional direction changes to stay unpredictable.`;
+            break;
+          case 'desperate':
+            ctx += ` EMERGENCY: You keep getting caught. COMPLETELY CHANGE your strategy. If you've been dodging, try going straight and sprinting. If you've been going straight, dodge aggressively. The enemy has learned your pattern — you MUST break it NOW.`;
+            break;
+          case 'struggling':
+            ctx += ` You are underperforming. Try a new approach: alternate between going straight for speed and dodging only at the last moment when the enemy is very close (under 1.5 units).`;
+            break;
+          default:
+            ctx += ` Play smart — go straight for speed, dodge only when the enemy is close.`;
+        }
+      } else {
+        switch (mood) {
+          case 'dominant':
+            ctx += ` You are dominating. Keep pressure on but vary your flanking direction so the object can't predict you.`;
+            break;
+          case 'confident':
+            ctx += ` You are performing well. Mix up direct charges with flanking to stay unpredictable.`;
+            break;
+          case 'desperate':
+            ctx += ` EMERGENCY: The object keeps escaping. COMPLETELY CHANGE your strategy. If you've been flanking one way, switch. If you've been going direct, try cutting off the object at its NEXT waypoint instead. Be unpredictable.`;
+            break;
+          case 'struggling':
+            ctx += ` You are underperforming. Try intercepting: instead of chasing the object's current position, aim for where it's GOING (its next waypoint). Cut it off.`;
+            break;
+          default:
+            ctx += ` Balance between direct pursuit and flanking. Aim ahead of the object, not at it.`;
+        }
+      }
+
+      return ctx;
+    }
+
+    // ---- PROMPT-BASED MEMORY ----
+    // Move log for the current round
+    let currentRoundMoves = []; // { turn: 'object'|'enemy', move: string, pos: {x,z}, enemyPos: {x,z}, enemyDist: number }
+
+    // Position trajectories for current round
+    let currentObjectPath = []; // [{x, y, z}]
+    let currentEnemyPath = [];  // [{x, y, z}]
+
+    // All rounds trajectory data
+    const allTrajectories = []; // [{ round, winner, objectPath: [{x,y,z}], enemyPath: [{x,y,z}] }]
+
+    // History of past rounds (kept to last 5 for context window)
+    const MAX_HISTORY = 5;
+    let gameHistory = []; // { round, winner, totalMoves, objectMoves: [], enemyMoves: [], summary }
+
+    function recordMove(agent, move) {
+      const oPos = { x: +objectMesh.position.x.toFixed(2), y: +objectMesh.position.y.toFixed(2), z: +objectMesh.position.z.toFixed(2) };
+      const ePos = { x: +enemyMesh.position.x.toFixed(2), y: +enemyMesh.position.y.toFixed(2), z: +enemyMesh.position.z.toFixed(2) };
+      const dist = +Math.hypot(oPos.x - ePos.x, oPos.z - ePos.z).toFixed(1);
+      currentRoundMoves.push({ turn: agent, move, objectPos: oPos, enemyPos: ePos, enemyDist: dist, wp: currentWaypointIdx });
+
+      // Record trajectory positions
+      currentObjectPath.push({ ...oPos });
+      currentEnemyPath.push({ ...ePos });
+    }
+
+    function finishRound(winner) {
+      roundNumber++;
+      updateElo(winner);
+      updateStreaks(winner);
+      const objectMoves = currentRoundMoves.filter(m => m.turn === 'object').map(m => m.move);
+      const enemyMoves = currentRoundMoves.filter(m => m.turn === 'enemy').map(m => m.move);
+
+      // Build a compact summary of what happened
+      const objMoveCounts = {};
+      objectMoves.forEach(m => { objMoveCounts[m] = (objMoveCounts[m] || 0) + 1; });
+      const enmMoveCounts = {};
+      enemyMoves.forEach(m => { enmMoveCounts[m] = (enmMoveCounts[m] || 0) + 1; });
+
+      // Find the critical moment — the last few moves before the round ended
+      const lastMoves = currentRoundMoves.slice(-6);
+      const criticalMoment = lastMoves.map(m =>
+        `${m.turn}:${m.move}(dist=${m.enemyDist},wp=${m.wp})`
+      ).join(' -> ');
+
+      const summary = {
+        round: roundNumber,
+        winner,
+        totalMoves: currentRoundMoves.length,
+        objectMoveCounts: objMoveCounts,
+        enemyMoveCounts: enmMoveCounts,
+        criticalMoment,
+        maxWpReached: Math.max(...currentRoundMoves.map(m => m.wp)),
+      };
+
+      gameHistory.push(summary);
+      if (gameHistory.length > MAX_HISTORY) gameHistory.shift();
+
+      // Save trajectory data for this round
+      allTrajectories.push({
+        round: roundNumber,
+        winner,
+        objectPath: [...currentObjectPath],
+        enemyPath: [...currentEnemyPath],
+      });
+
+      log(`Round ${roundNumber} memory saved (${winner} won in ${summary.totalMoves} moves, ${currentObjectPath.length} positions recorded)`);
+      updateRoundLog(summary);
+      currentRoundMoves = [];
+      currentObjectPath = [];
+      currentEnemyPath = [];
+    }
+
+    const roundLogEntries = document.getElementById('round-log-entries');
+    const graphCanvas = document.getElementById('graph-canvas');
+    const graphCtx = graphCanvas.getContext('2d');
+    const allRoundResults = []; // persistent across MAX_HISTORY limit
+
+    function drawGraph() {
+      const W = graphCanvas.width;
+      const H = graphCanvas.height;
+      const pad = 12;
+      const plotW = W - pad * 2;
+      const plotH = H - pad * 2;
+
+      graphCtx.clearRect(0, 0, W, H);
+
+      if (allTrajectories.length === 0) {
+        graphCtx.fillStyle = '#555';
+        graphCtx.font = '12px monospace';
+        graphCtx.textAlign = 'center';
+        graphCtx.fillText('Waiting for data...', W / 2, H / 2);
+        return;
+      }
+
+      // World bounds for mapping x/z to canvas
+      const worldMinX = -3.5, worldMaxX = 3.5;
+      const worldMinZ = -3.5, worldMaxZ = 3.5;
+      const worldW = worldMaxX - worldMinX;
+      const worldH = worldMaxZ - worldMinZ;
+
+      function toCanvasX(wx) { return pad + ((wx - worldMinX) / worldW) * plotW; }
+      function toCanvasY(wz) { return pad + ((wz - worldMinZ) / worldH) * plotH; }
+
+      // Draw the waypoint path as background reference
+      graphCtx.strokeStyle = 'rgba(0,255,0,0.15)';
+      graphCtx.lineWidth = 1;
+      graphCtx.setLineDash([4, 4]);
+      graphCtx.beginPath();
+      PATH_WAYPOINTS.forEach((wp, i) => {
+        const cx = toCanvasX(wp.x);
+        const cy = toCanvasY(wp.z);
+        if (i === 0) graphCtx.moveTo(cx, cy);
+        else graphCtx.lineTo(cx, cy);
+      });
+      graphCtx.stroke();
+      graphCtx.setLineDash([]);
+
+      // Waypoint dots
+      PATH_WAYPOINTS.forEach((wp, i) => {
+        const cx = toCanvasX(wp.x);
+        const cy = toCanvasY(wp.z);
+        graphCtx.beginPath();
+        graphCtx.arc(cx, cy, 2, 0, Math.PI * 2);
+        graphCtx.fillStyle = 'rgba(0,255,0,0.25)';
+        graphCtx.fill();
+      });
+
+      // Draw trajectories for each round
+      const totalRounds = allTrajectories.length;
+      const maxShow = 10; // show last N rounds
+      const visible = allTrajectories.slice(-maxShow);
+
+      visible.forEach((traj, idx) => {
+        const age = visible.length - idx; // 1 = newest
+        const alphaBase = age === 1 ? 0.9 : Math.max(0.2, 0.7 / Math.sqrt(age));
+
+        // VLM 1 (object) trajectory — blue
+        if (traj.objectPath.length >= 2) {
+          graphCtx.globalAlpha = alphaBase;
+          graphCtx.strokeStyle = '#4488ff';
+          graphCtx.lineWidth = age === 1 ? 2.5 : 1.5;
+          graphCtx.lineJoin = 'round';
+          graphCtx.lineCap = 'round';
+          graphCtx.beginPath();
+          traj.objectPath.forEach((p, i) => {
+            const cx = toCanvasX(p.x);
+            const cy = toCanvasY(p.z);
+            if (i === 0) graphCtx.moveTo(cx, cy);
+            else graphCtx.lineTo(cx, cy);
+          });
+          graphCtx.stroke();
+
+          // Start dot
+          if (age === 1) {
+            const s = traj.objectPath[0];
+            graphCtx.beginPath();
+            graphCtx.arc(toCanvasX(s.x), toCanvasY(s.z), 3, 0, Math.PI * 2);
+            graphCtx.fillStyle = '#4488ff';
+            graphCtx.fill();
+            // End dot
+            const e = traj.objectPath[traj.objectPath.length - 1];
+            graphCtx.beginPath();
+            graphCtx.arc(toCanvasX(e.x), toCanvasY(e.z), 3, 0, Math.PI * 2);
+            graphCtx.fillStyle = '#88bbff';
+            graphCtx.fill();
+          }
+        }
+
+        // VLM 2 (enemy) trajectory — red
+        if (traj.enemyPath.length >= 2) {
+          graphCtx.globalAlpha = alphaBase;
+          graphCtx.strokeStyle = '#ff4444';
+          graphCtx.lineWidth = age === 1 ? 2.5 : 1.5;
+          graphCtx.beginPath();
+          traj.enemyPath.forEach((p, i) => {
+            const cx = toCanvasX(p.x);
+            const cy = toCanvasY(p.z);
+            if (i === 0) graphCtx.moveTo(cx, cy);
+            else graphCtx.lineTo(cx, cy);
+          });
+          graphCtx.stroke();
+
+          if (age === 1) {
+            const s = traj.enemyPath[0];
+            graphCtx.beginPath();
+            graphCtx.arc(toCanvasX(s.x), toCanvasY(s.z), 3, 0, Math.PI * 2);
+            graphCtx.fillStyle = '#ff4444';
+            graphCtx.fill();
+            const e = traj.enemyPath[traj.enemyPath.length - 1];
+            graphCtx.beginPath();
+            graphCtx.arc(toCanvasX(e.x), toCanvasY(e.z), 3, 0, Math.PI * 2);
+            graphCtx.fillStyle = '#ff8888';
+            graphCtx.fill();
+          }
+        }
+
+        graphCtx.globalAlpha = 1;
+      });
+
+      // Round label on latest
+      if (visible.length > 0) {
+        const latest = visible[visible.length - 1];
+        graphCtx.fillStyle = '#fff';
+        graphCtx.font = '9px monospace';
+        graphCtx.textAlign = 'left';
+        graphCtx.fillText(`R${latest.round}`, pad + 2, pad + 10);
+
+        const winColor = latest.winner === 'object' ? '#4488ff' : '#ff4444';
+        const winLabel = latest.winner === 'object' ? 'VLM 1' : 'VLM 2';
+        graphCtx.fillStyle = winColor;
+        graphCtx.fillText(`${winLabel} won`, pad + 2, pad + 20);
+      }
+    }
+
+    drawGraph();
+
+    function buildNarrative(summary) {
+      const totalWP = PATH_WAYPOINTS.length - 1;
+      const wpProgress = summary.maxWpReached;
+      const pct = Math.round((wpProgress / totalWP) * 100);
+
+      let narrative = '';
+
+      if (summary.winner === 'object') {
+        if (summary.totalMoves < 15) {
+          narrative = `VLM 1 sprinted to the goal in just ${summary.totalMoves} moves — VLM 2 never got close.`;
+        } else if (summary.totalMoves < 30) {
+          narrative = `VLM 1 navigated the path and reached the goal after a solid ${summary.totalMoves}-move run.`;
+        } else {
+          narrative = `A long battle of ${summary.totalMoves} moves, but VLM 1 outlasted the VLM 2 and reached the goal.`;
+        }
+      } else {
+        if (wpProgress <= 1) {
+          narrative = `VLM 2 caught VLM 1 almost immediately — only made it ${pct}% through the path.`;
+        } else if (pct < 50) {
+          narrative = `VLM 1 was intercepted early at WP${wpProgress} (${pct}% of path) after ${summary.totalMoves} moves.`;
+        } else if (pct < 80) {
+          narrative = `Close one! VLM 1 got ${pct}% through the path before VLM 2 closed in at WP${wpProgress}.`;
+        } else {
+          narrative = `Heartbreaker — VLM 1 was ${pct}% to the goal at WP${wpProgress} but VLM 2 caught up in the final stretch.`;
+        }
+      }
+
+      const topObjMove = Object.entries(summary.objectMoveCounts).sort((a, b) => b[1] - a[1])[0];
+      const topEnmMove = Object.entries(summary.enemyMoveCounts).sort((a, b) => b[1] - a[1])[0];
+      if (topObjMove && topEnmMove) {
+        narrative += ` VLM 1 favored "${topObjMove[0]}", VLM 2 relied on "${topEnmMove[0]}".`;
+      }
+
+      return narrative;
+    }
+
+    function updateRoundLog(summary) {
+      const entry = document.createElement('div');
+      entry.className = `round-entry ${summary.winner === 'object' ? 'object-win' : 'enemy-win'}`;
+
+      const winnerLabel = summary.winner === 'object' ? 'VLM 1' : 'VLM 2';
+      const winnerClass = summary.winner === 'object' ? 'obj' : 'enm';
+
+      const objMoves = Object.entries(summary.objectMoveCounts).map(([k, v]) => `${k}x${v}`).join(', ');
+      const enmMoves = Object.entries(summary.enemyMoveCounts).map(([k, v]) => `${k}x${v}`).join(', ');
+      const totalWP = PATH_WAYPOINTS.length - 1;
+
+      entry.innerHTML = `
+        <div class="re-header">
+          <span class="re-round">ROUND ${summary.round}</span>
+          <span class="re-winner ${winnerClass}">${winnerLabel} WINS</span>
+        </div>
+        <div class="re-moves">${summary.totalMoves} moves | WP ${summary.maxWpReached}/${totalWP}</div>
+        <div class="re-narrative">${buildNarrative(summary)}</div>
+        <div class="re-detail"><span class="re-label">VLM 1:</span> ${objMoves}</div>
+        <div class="re-detail"><span class="re-label">VLM 2:</span> ${enmMoves}</div>
+      `;
+
+      roundLogEntries.insertBefore(entry, roundLogEntries.firstChild);
+
+      allRoundResults.push({ round: summary.round, winner: summary.winner, totalMoves: summary.totalMoves, objectElo, enemyElo, maxWp: summary.maxWpReached });
+      drawGraph();
+    }
+
+    function buildHistoryContext(agent) {
+      if (gameHistory.length === 0) return '';
+
+      let ctx = `\n\nGAME HISTORY (learn from past rounds):\n`;
+      for (const h of gameHistory) {
+        ctx += `Round ${h.round}: ${h.winner} won in ${h.totalMoves} moves. `;
+        ctx += `Object reached WP ${h.maxWpReached}. `;
+        ctx += `Object used: ${Object.entries(h.objectMoveCounts).map(([k,v]) => `${k}:${v}`).join(', ')}. `;
+        ctx += `Enemy used: ${Object.entries(h.enemyMoveCounts).map(([k,v]) => `${k}:${v}`).join(', ')}. `;
+        ctx += `Final sequence: ${h.criticalMoment}\n`;
+      }
+
+      const wins = gameHistory.filter(h => h.winner === agent).length;
+      const losses = gameHistory.length - wins;
+
+      if (agent === 'object') {
+        ctx += `\nYou (object) have won ${wins} and lost ${losses} of the last ${gameHistory.length} rounds.`;
+        if (losses > wins) {
+          ctx += ` You are losing — try different dodge patterns. If you always go straight, try dodging more. If you always dodge one direction, try the other.`;
+        }
+        // Look at what the enemy does most
+        const allEnemyMoves = {};
+        gameHistory.forEach(h => {
+          Object.entries(h.enemyMoveCounts).forEach(([k, v]) => { allEnemyMoves[k] = (allEnemyMoves[k] || 0) + v; });
+        });
+        const topEnemyMove = Object.entries(allEnemyMoves).sort((a, b) => b[1] - a[1])[0];
+        if (topEnemyMove) {
+          ctx += ` The enemy tends to use "${topEnemyMove[0]}" most often — dodge accordingly.`;
+        }
+      } else {
+        ctx += `\nYou (enemy) have won ${wins} and lost ${losses} of the last ${gameHistory.length} rounds.`;
+        if (losses > wins) {
+          ctx += ` You are losing — the object keeps escaping. Try flanking toward its next waypoint instead of going direct. Predict where it will be.`;
+        }
+        const allObjMoves = {};
+        gameHistory.forEach(h => {
+          Object.entries(h.objectMoveCounts).forEach(([k, v]) => { allObjMoves[k] = (allObjMoves[k] || 0) + v; });
+        });
+        const topObjMove = Object.entries(allObjMoves).sort((a, b) => b[1] - a[1])[0];
+        if (topObjMove) {
+          ctx += ` The object tends to use "${topObjMove[0]}" most often — anticipate that.`;
+        }
+      }
+
+      return ctx;
+    }
+
+    const roundNumberEl = document.getElementById('round-number');
+
+    function updateScoreboard() {
+      roundNumberEl.textContent = `Round: ${roundNumber + 1}`;
+      moveCountEl.textContent = `Moves: ${totalMoves}`;
+      objectWinsEl.textContent = `Wins: ${objectWins}`;
+      enemyWinsEl.textContent = `Wins: ${enemyWins}`;
+    }
+
+    function showWin(winner) {
+      roundOver = true;
+      finishRound(winner);
+      const banner = document.getElementById('win-banner');
+      if (winner === 'object') {
+        objectWins++;
+        banner.style.color = '#4488ff';
+        banner.textContent = 'VLM 1 WINS!';
+        log('VLM 1 reached the goal!');
+      } else {
+        enemyWins++;
+        banner.style.color = '#ff4444';
+        banner.textContent = 'VLM 2 WINS!';
+        log('VLM 2 caught the VLM 1!');
+
+        const flashEl = document.getElementById('collide-flash');
+        flashEl.classList.remove('visible');
+        void flashEl.offsetWidth;
+        flashEl.classList.add('visible');
+        setTimeout(() => flashEl.classList.remove('visible'), 800);
+      }
+      banner.classList.add('visible');
+      updateScoreboard();
+
+      // Auto-reset after 3s
+      setTimeout(() => {
+        banner.classList.remove('visible');
+        resetRound();
+      }, 3000);
+    }
+
+    function resetRound() {
+      objectMesh.position.set(-2.5, 0.4, 3.0);
+      enemyMesh.position.set(0, 0.6, 0);
+      currentWaypointIdx = 1;
+      totalMoves = 0;
+      roundOver = false;
+      trailPoints.length = 0;
+      trailPoints.push(objectMesh.position.clone());
+      trailGeom.setFromPoints(trailPoints);
+      enemyTrailPoints.length = 0;
+      enemyTrailPoints.push(enemyMesh.position.clone());
+      enemyTrailGeom.setFromPoints(enemyTrailPoints);
+      updateScoreboard();
+      log('--- New round ---');
+    }
+
+    // =========================================================================
+    // MOVEMENT HELPERS
+    // =========================================================================
+
+    // Object: step toward current waypoint, optionally dodging left/right
+    function objectStep(dodgeDir) {
+      const wp = PATH_WAYPOINTS[currentWaypointIdx];
+      const dx = wp.x - objectMesh.position.x;
+      const dz = wp.z - objectMesh.position.z;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist < WAYPOINT_THRESHOLD) {
+        if (currentWaypointIdx < PATH_WAYPOINTS.length - 1) {
+          currentWaypointIdx++;
+          log(`Reached WP ${currentWaypointIdx}/${PATH_WAYPOINTS.length - 1}`);
+        } else {
+          return 'goal';
+        }
+      }
+
+      const wp2 = PATH_WAYPOINTS[currentWaypointIdx];
+      const dx2 = wp2.x - objectMesh.position.x;
+      const dz2 = wp2.z - objectMesh.position.z;
+      const dist2 = Math.hypot(dx2, dz2);
+      const step = Math.min(STEP_SIZE, dist2);
+
+      let moveDx = (dx2 / dist2) * step;
+      let moveDz = (dz2 / dist2) * step;
+
+      // Lateral dodge
+      if (dodgeDir) {
+        const len = dist2 || 1;
+        const perpX = -dz2 / len;
+        const perpZ = dx2 / len;
+        const dodgeMag = STEP_SIZE * 0.7;
+        if (dodgeDir === 'left') {
+          moveDx += perpX * dodgeMag;
+          moveDz += perpZ * dodgeMag;
+        } else {
+          moveDx -= perpX * dodgeMag;
+          moveDz -= perpZ * dodgeMag;
+        }
+      }
+
+      // Clamp
+      const mag = Math.hypot(moveDx, moveDz);
+      if (mag > STEP_SIZE) {
+        moveDx = (moveDx / mag) * STEP_SIZE;
+        moveDz = (moveDz / mag) * STEP_SIZE;
+      }
+
+      objectMesh.position.x += moveDx;
+      objectMesh.position.z += moveDz;
+
+      trailPoints.push(new THREE.Vector3(objectMesh.position.x, pathY, objectMesh.position.z));
+      trailGeom.setFromPoints(trailPoints);
+
+      return 'moved';
+    }
+
+    // Enemy: step toward a target position
+    function enemyStep(moveDir) {
+      const tx = objectMesh.position.x;
+      const tz = objectMesh.position.z;
+      const dx = tx - enemyMesh.position.x;
+      const dz = tz - enemyMesh.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.01) return;
+
+      let moveDx = (dx / dist) * ENEMY_STEP_SIZE;
+      let moveDz = (dz / dist) * ENEMY_STEP_SIZE;
+
+      // VLM can suggest flanking direction
+      if (moveDir === 'flank-left' || moveDir === 'flank-right') {
+        const len = dist || 1;
+        const perpX = -dz / len;
+        const perpZ = dx / len;
+        const flankMag = ENEMY_STEP_SIZE * 0.5;
+        if (moveDir === 'flank-left') {
+          moveDx += perpX * flankMag;
+          moveDz += perpZ * flankMag;
+        } else {
+          moveDx -= perpX * flankMag;
+          moveDz -= perpZ * flankMag;
+        }
+        const mag = Math.hypot(moveDx, moveDz);
+        if (mag > ENEMY_STEP_SIZE) {
+          moveDx = (moveDx / mag) * ENEMY_STEP_SIZE;
+          moveDz = (moveDz / mag) * ENEMY_STEP_SIZE;
+        }
+      }
+
+      enemyMesh.position.x += moveDx;
+      enemyMesh.position.z += moveDz;
+
+      enemyTrailPoints.push(new THREE.Vector3(enemyMesh.position.x, pathY, enemyMesh.position.z));
+      enemyTrailGeom.setFromPoints(enemyTrailPoints);
+    }
+
+    function checkCollision() {
+      const d = Math.hypot(
+        objectMesh.position.x - enemyMesh.position.x,
+        objectMesh.position.z - enemyMesh.position.z
+      );
+      return d < COLLISION_RADIUS;
+    }
+
+    // =========================================================================
+    // SCREENSHOTS for VLM
+    // =========================================================================
+    function objectScreenshot() {
+      objectRenderer.render(scene, objectCam);
+      return objectRenderer.domElement.toDataURL('image/png');
+    }
+
+    function enemyScreenshot() {
+      enemyRenderer.render(scene, enemyCam);
+      return enemyRenderer.domElement.toDataURL('image/png');
+    }
+
+    // =========================================================================
+    // VLM PROMPTS
+    // =========================================================================
+    function compactHistory(agent) {
+      if (gameHistory.length === 0 && currentRoundMoves.length === 0) return '';
+
+      let ctx = '\n';
+
+      // Current round moves — last 5 only, very compact
+      const myMoves = currentRoundMoves.filter(m => m.turn === agent).slice(-5);
+      if (myMoves.length > 0) {
+        ctx += `This round: ${myMoves.map(m => m.move).join(',')}. `;
+        // Show if enemy is getting closer or farther
+        if (myMoves.length >= 2) {
+          const first = myMoves[0].enemyDist;
+          const last = myMoves[myMoves.length - 1].enemyDist;
+          ctx += last < first ? 'Enemy CLOSING IN. ' : 'Enemy falling behind. ';
+        }
+      }
+
+      // Last round result — one line
+      if (gameHistory.length > 0) {
+        const last = gameHistory[gameHistory.length - 1];
+        const losingMove = agent === 'object'
+          ? Object.entries(last.objectMoveCounts).sort((a, b) => b[1] - a[1])[0]
+          : Object.entries(last.enemyMoveCounts).sort((a, b) => b[1] - a[1])[0];
+        if (last.winner !== agent && losingMove) {
+          ctx += `Last round you LOST using "${losingMove[0]}" too much. DO SOMETHING DIFFERENT. `;
+        } else if (last.winner === agent) {
+          ctx += `Last round you WON. `;
+        }
+      }
+
+      // Win rate — one line
+      if (allRoundResults.length >= 3) {
+        const recent = allRoundResults.slice(-5);
+        const wins = recent.filter(r => r.winner === agent).length;
+        if (wins <= 1) ctx += `You are losing most rounds — CHANGE YOUR STRATEGY. `;
+      }
+
+      return ctx;
+    }
+
+    function objectPrompt() {
+      const pos = objectMesh.position;
+      const wp = PATH_WAYPOINTS[currentWaypointIdx];
+      const ex = enemyMesh.position;
+      const enemyDist = +Math.hypot(pos.x - ex.x, pos.z - ex.z).toFixed(1);
+
+      let cmd;
+      if (enemyDist <= 1.0) cmd = 'DODGE NOW! Say "left" or "right"!';
+      else if (enemyDist <= 2.0) cmd = 'Enemy close! Dodge "left" or "right" or risk "straight".';
+      else cmd = 'Enemy far. "straight" is fast, or dodge to be safe.';
+
+      return `Enemy ${enemyDist} away. ${cmd}
+${compactHistory('object')}
+Answer: straight, left, or right.`;
+    }
+
+    function enemyPrompt() {
+      const pos = enemyMesh.position;
+      const target = objectMesh.position;
+      const dist = +Math.hypot(pos.x - target.x, pos.z - target.z).toFixed(1);
+      const wp = PATH_WAYPOINTS[Math.min(currentWaypointIdx + 1, PATH_WAYPOINTS.length - 1)];
+
+      let cmd;
+      if (dist <= 1.0) cmd = 'Almost there! "direct" to catch it!';
+      else if (dist <= 2.5) cmd = 'Close! "direct" or flank to cut off.';
+      else cmd = `Far away. "flank-left" or "flank-right" to intercept at (${wp.x.toFixed(0)},${wp.z.toFixed(0)}).`;
+
+      return `Target ${dist} away at (${target.x.toFixed(0)},${target.z.toFixed(0)}). ${cmd}
+${compactHistory('enemy')}
+Answer: direct, flank-left, or flank-right.`;
+    }
+
+    // =========================================================================
+    // MAIN: Turn-based VLM agent loop
+    // =========================================================================
+    async function init() {
+      try {
+        const keyResp = await fetch('/overshoot-key');
+        const { key } = await keyResp.json();
+        if (!key) {
+          overshootResultEl.textContent = 'No API key configured';
+          return;
+        }
+
+        log(`Path: ${PATH_WAYPOINTS.length} waypoints`);
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Turn-based agent loop
+        log('Phase 2: Starting turn-based agent battle');
+
+        // Intercept getUserMedia to provide canvas streams
+        const objectStream = objectRenderer.domElement.captureStream(10);
+        const enemyStream = enemyRenderer.domElement.captureStream(10);
+        let activeStream = objectStream;
+
+        const origGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+          if (constraints?.video) return activeStream;
+          return origGUM(constraints);
+        };
+
+        // Object's VLM
+        let objectVlmResult = null;
+        let objectWaiting = false;
+
+        const objectVision = new RealtimeVision({
+          apiKey: key,
+          model: 'Qwen/Qwen3.5-9B',
+          prompt: objectPrompt(),
+          source: { type: 'camera', cameraFacing: 'environment' },
+          outputSchema: {
+            type: 'object',
+            properties: {
+              move: { type: 'string', description: '"straight", "left", or "right"' },
+            },
+            required: ['move'],
+          },
+          onResult: (result) => {
+            if (!objectWaiting) return;
+            let move = 'straight';
+            if (result.ok) {
+              const raw = (result.result || '').toLowerCase();
+              if (raw.includes('left')) move = 'left';
+              else if (raw.includes('right')) move = 'right';
+            }
+            objectVlmResult = move;
+            objectWaiting = false;
+          },
+          onError: () => { objectVlmResult = 'straight'; objectWaiting = false; },
+        });
+
+        // Enemy's VLM
+        let enemyVlmResult = null;
+        let enemyWaiting = false;
+
+        // We need a second stream for enemy - switch active stream before starting
+        const enemyVision = new RealtimeVision({
+          apiKey: key,
+          model: 'Qwen/Qwen3.5-9B',
+          prompt: enemyPrompt(),
+          source: { type: 'camera', cameraFacing: 'environment' },
+          outputSchema: {
+            type: 'object',
+            properties: {
+              move: { type: 'string', description: '"direct", "flank-left", or "flank-right"' },
+            },
+            required: ['move'],
+          },
+          onResult: (result) => {
+            if (!enemyWaiting) return;
+            let move = 'direct';
+            if (result.ok) {
+              const raw = (result.result || '').toLowerCase();
+              if (raw.includes('flank-left') || raw.includes('flank left')) move = 'flank-left';
+              else if (raw.includes('flank-right') || raw.includes('flank right')) move = 'flank-right';
+            }
+            enemyVlmResult = move;
+            enemyWaiting = false;
+          },
+          onError: () => { enemyVlmResult = 'direct'; enemyWaiting = false; },
+        });
+
+        // Start object VLM first
+        activeStream = objectStream;
+        await objectVision.start();
+        log('Object VLM started');
+
+        // Start enemy VLM
+        activeStream = enemyStream;
+        await enemyVision.start();
+        log('Enemy VLM started');
+
+        // Turn-based loop
+        let turn = 'object'; // 'object' or 'enemy'
+
+        const TURN_INTERVAL = 400;
+
+        const gameLoop = setInterval(() => {
+          if (roundOver) return;
+
+          if (turn === 'object') {
+            // Object's turn
+            if (!objectWaiting && objectVlmResult === null) {
+              // Request VLM decision
+              objectWaiting = true;
+              turnIndicatorEl.textContent = "Object's turn (thinking...)";
+              objectVision.updatePrompt(objectPrompt());
+              overshootResultEl.textContent = `Object thinking...`;
+              return;
+            }
+
+            if (objectWaiting) return; // still waiting
+
+            // Apply object's move
+            const move = objectVlmResult || 'straight';
+            objectVlmResult = null;
+            const dodgeDir = move === 'straight' ? null : move;
+            const result = objectStep(dodgeDir);
+            recordMove('object', move);
+            totalMoves++;
+            updateScoreboard();
+            log(`Object: ${move} (WP ${currentWaypointIdx})`);
+            overshootResultEl.textContent = `Object moved: ${move}`;
+            turnIndicatorEl.textContent = "Object moved";
+
+            if (result === 'goal') {
+              showWin('object');
+              return;
+            }
+
+            if (checkCollision()) {
+              showWin('enemy');
+              return;
+            }
+
+            turn = 'enemy';
+
+          } else {
+            // Enemy's turn — skip if object still has head start moves
+            const objectMoveCount = currentRoundMoves.filter(m => m.turn === 'object').length;
+            if (objectMoveCount <= OBJECT_HEAD_START) {
+              log(`Head start: object move ${objectMoveCount}/${OBJECT_HEAD_START}, enemy waits`);
+              turnIndicatorEl.textContent = `Enemy frozen (head start ${objectMoveCount}/${OBJECT_HEAD_START})`;
+              overshootResultEl.textContent = `Object head start...`;
+              turn = 'object';
+              return;
+            }
+
+            if (!enemyWaiting && enemyVlmResult === null) {
+              enemyWaiting = true;
+              turnIndicatorEl.textContent = "Enemy's turn (thinking...)";
+              enemyVision.updatePrompt(enemyPrompt());
+              overshootResultEl.textContent = `Enemy thinking...`;
+              return;
+            }
+
+            if (enemyWaiting) return;
+
+            // Apply enemy's move
+            const move = enemyVlmResult || 'direct';
+            enemyVlmResult = null;
+            enemyStep(move);
+            recordMove('enemy', move);
+            totalMoves++;
+            updateScoreboard();
+            log(`Enemy: ${move}`);
+            overshootResultEl.textContent = `Enemy moved: ${move}`;
+            turnIndicatorEl.textContent = "Enemy moved";
+
+            if (checkCollision()) {
+              showWin('enemy');
+              return;
+            }
+
+            turn = 'object';
+          }
+        }, TURN_INTERVAL);
+
+      } catch (err) {
+        overshootResultEl.textContent = `Failed: ${err.message}`;
+        log(`Init failed: ${err.message}`);
+      }
+    }
+
+    init();
+
+    // WebSocket connection (for external control / screenshots)
+    function connect() {
+      const ws = new WebSocket('ws://localhost:8000/ws');
+
+      ws.onopen = () => log('WebSocket connected');
+
+      ws.onmessage = (event) => {
+        const cmd = JSON.parse(event.data);
+        if (cmd.action === 'updatePosition') {
+          objectMesh.position.x += cmd.dx;
+          objectMesh.position.y += cmd.dy;
+          objectMesh.position.z += cmd.dz;
+        } else if (cmd.action === 'updateRotation') {
+          objectMesh.rotation.x += cmd.dx;
+          objectMesh.rotation.y += cmd.dy;
+          objectMesh.rotation.z += cmd.dz;
+        }
+
+        requestAnimationFrame(() => {
+          const image = objectScreenshot();
+          ws.send(JSON.stringify({ image }));
+        });
+      };
+
+      ws.onclose = () => setTimeout(connect, 2000);
+      ws.onerror = () => ws.close();
+    }
+    connect();
+  </script>
+</body>
+</html>

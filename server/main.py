@@ -110,6 +110,10 @@ async def root():
 async def client_page():
     return FileResponse(Path(__file__).parent / "example_client_1.html")
 
+@app.get("/competition")
+async def competition_page():
+    return FileResponse(Path(__file__).parent / "example_client.html")
+
 @app.get("/button")
 async def button_page():
     return FileResponse(Path(__file__).parent / "button_page.html")
