@@ -3,15 +3,114 @@
 import argparse
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 from living_room_env import LivingRoomNavEnv, load_trajectories
 from pd_controller import PDController
+
+
+class MetricsCallback(BaseCallback):
+    """Track episode rewards, lengths, waypoint progress, and collisions."""
+
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self.episode_rewards: list[float] = []
+        self.episode_lengths: list[int] = []
+        self.waypoint_fractions: list[float] = []
+        self.collisions: list[bool] = []
+        self.timesteps_at_episode: list[int] = []
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            if "episode" in info:
+                self.episode_rewards.append(info["episode"]["r"])
+                self.episode_lengths.append(info["episode"]["l"])
+                self.timesteps_at_episode.append(self.num_timesteps)
+                wp = info.get("wp_idx", 0)
+                wp_total = info.get("wp_total", 1)
+                self.waypoint_fractions.append(wp / max(wp_total, 1))
+                self.collisions.append(info.get("collision", False))
+        return True
+
+
+def plot_training_curves(cb: MetricsCallback, save_path: str = "checkpoints/training_curves.png"):
+    """Plot training metrics over time."""
+    if not cb.episode_rewards:
+        print("No episode data to plot.")
+        return
+
+    timesteps = np.array(cb.timesteps_at_episode)
+    rewards = np.array(cb.episode_rewards)
+    lengths = np.array(cb.episode_lengths)
+    wp_frac = np.array(cb.waypoint_fractions)
+    collisions = np.array(cb.collisions, dtype=float)
+
+    # Smoothing window
+    window = max(len(rewards) // 50, 5)
+
+    def smooth(arr):
+        if len(arr) < window:
+            return arr
+        kernel = np.ones(window) / window
+        return np.convolve(arr, kernel, mode="valid")
+
+    def smooth_x(x):
+        if len(x) < window:
+            return x
+        return x[window - 1:]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle("Training Progress", fontsize=14)
+
+    # Episode reward
+    ax = axes[0, 0]
+    ax.plot(timesteps, rewards, alpha=0.2, color="tab:blue")
+    ax.plot(smooth_x(timesteps), smooth(rewards), color="tab:blue", linewidth=2)
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Episode Reward")
+    ax.set_title("Episode Reward")
+    ax.grid(True, alpha=0.3)
+
+    # Episode length
+    ax = axes[0, 1]
+    ax.plot(timesteps, lengths, alpha=0.2, color="tab:orange")
+    ax.plot(smooth_x(timesteps), smooth(lengths), color="tab:orange", linewidth=2)
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Steps")
+    ax.set_title("Episode Length")
+    ax.grid(True, alpha=0.3)
+
+    # Waypoint progress
+    ax = axes[1, 0]
+    ax.plot(timesteps, wp_frac * 100, alpha=0.2, color="tab:green")
+    ax.plot(smooth_x(timesteps), smooth(wp_frac * 100), color="tab:green", linewidth=2)
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("% Waypoints Reached")
+    ax.set_title("Waypoint Completion")
+    ax.set_ylim(-5, 105)
+    ax.grid(True, alpha=0.3)
+
+    # Collision rate (rolling)
+    ax = axes[1, 1]
+    ax.plot(smooth_x(timesteps), smooth(collisions) * 100, color="tab:red", linewidth=2)
+    ax.set_xlabel("Timesteps")
+    ax.set_ylabel("Collision Rate (%)")
+    ax.set_title("Collision Rate (rolling)")
+    ax.set_ylim(-5, 105)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150)
+    print(f"Training curves saved to {save_path}")
+    plt.close(fig)
 
 
 def collect_bc_data(
@@ -110,7 +209,7 @@ def load_bc_into_ppo(model: PPO, bc_path: Path):
 
 def make_env(trajectories: list[np.ndarray], max_steps: int = 1000):
     def _init():
-        return LivingRoomNavEnv(trajectories=trajectories, max_episode_steps=max_steps)
+        return Monitor(LivingRoomNavEnv(trajectories=trajectories, max_episode_steps=max_steps))
     return _init
 
 
@@ -176,10 +275,13 @@ def main():
         n_eval_episodes=5,
         deterministic=True,
     )
+    metrics_callback = MetricsCallback()
 
-    model.learn(total_timesteps=args.timesteps, callback=eval_callback)
+    model.learn(total_timesteps=args.timesteps, callback=[eval_callback, metrics_callback])
     model.save("checkpoints/ppo_livingroom")
     print("Training complete. Model saved to checkpoints/ppo_livingroom.zip")
+
+    plot_training_curves(metrics_callback)
 
     vec_env.close()
     eval_env.close()

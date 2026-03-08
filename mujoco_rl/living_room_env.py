@@ -246,8 +246,9 @@ class LivingRoomNavEnv(gym.Env):
                 terminated = True
                 info["trajectory_complete"] = True
 
-        # Collision check
+        # Collision check — explicit penalty so the agent learns to avoid obstacles
         if self._check_collision():
+            reward -= 10.0
             terminated = True
             info["collision"] = True
 
