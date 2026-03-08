@@ -103,11 +103,11 @@ class LogResponse(BaseModel):
 
 @app.get("/")
 async def root():
-    return FileResponse(Path(__file__).parent / "example_client.html")
+    return FileResponse(Path(__file__).parent / "example_client_1.html")
 
-@app.get("/client")
+@app.get("/client-1")
 async def client_page():
-    return FileResponse(Path(__file__).parent / "example_client.html")
+    return FileResponse(Path(__file__).parent / "example_client_1.html")
 
 @app.get("/button")
 async def button_page():
