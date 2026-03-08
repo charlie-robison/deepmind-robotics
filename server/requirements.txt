@@ -9,3 +9,4 @@ google-genai>=1.0.0
 motor>=3.3.0
 beanie>=1.25.0
 python-dotenv>=1.0.0
+modal>=1.0.0

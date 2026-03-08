@@ -9,6 +9,7 @@ import json
 from tool_calls.depth import DepthResult
 from tool_calls.three_js import camera_update, update_position as _update_position, update_rotation as _update_rotation
 from tool_calls.mcp import start_mcp_session
+from tool_calls.lyra import reconstruct_3d_from_image, list_lyra_outputs, get_lyra_ply
 from database import init_db
 from models import Environment, Pose, Trajectory, ActivityLog
 from ws_manager import ws_manager
@@ -206,3 +207,57 @@ async def update_rotation(request: RotationRequest) -> DepthResult:
 @app.post("/updateCamera")
 async def update_camera(request: CameraRequest) -> DepthResult:
     return await camera_update(request.zoom_percentage)
+
+
+## LYRA 3D RECONSTRUCTION (https://github.com/nv-tlabs/lyra.git)
+class LyraReconstructRequest(BaseModel):
+    image: str  # base64-encoded image
+    image_name: str = "input.png"
+    output_name: str = "scene"
+    movement_factor: float = 1.0
+
+class LyraReconstructResponse(BaseModel):
+    success: bool
+    step1_time_s: int | None = None
+    step2_time_s: int | None = None
+    total_time_s: int | None = None
+    ply_files: list[str] = []
+    video_files: list[str] = []
+    output_dir: str | None = None
+    error: str | None = None
+    step: int | None = None
+
+class LyraOutputFile(BaseModel):
+    path: str
+    size_mb: float
+
+@app.post("/lyra/reconstruct")
+async def lyra_reconstruct(request: LyraReconstructRequest) -> LyraReconstructResponse:
+    """Single image -> 3D Gaussian Splat via Lyra on Modal."""
+    result = await reconstruct_3d_from_image(
+        image_base64=request.image,
+        image_name=request.image_name,
+        output_name=request.output_name,
+        movement_factor=request.movement_factor,
+    )
+    return LyraReconstructResponse(**{
+        k: v for k, v in result.items()
+        if k in LyraReconstructResponse.model_fields
+    })
+
+@app.get("/lyra/outputs")
+async def lyra_list_outputs() -> list[LyraOutputFile]:
+    """List all files produced by Lyra on the Modal output volume."""
+    files = await list_lyra_outputs()
+    return [LyraOutputFile(**f) for f in files]
+
+@app.get("/lyra/ply/{path:path}")
+async def lyra_download_ply(path: str):
+    """Download a PLY file from the Lyra output volume."""
+    from fastapi.responses import Response
+    data = await get_lyra_ply(path)
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename={Path(path).name}"},
+    )
